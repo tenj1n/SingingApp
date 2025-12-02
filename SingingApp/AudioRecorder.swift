@@ -15,6 +15,9 @@ class AudioRecorder: ObservableObject {
     
     @Published var feedbackMessage: String = ""
     @Published var feedbackScore: Int = 0
+    @Published var pitchImageURL: String = ""
+    @Published var volumeImageURL: String = ""
+
     
     var audioURL: URL {
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -63,7 +66,7 @@ class AudioRecorder: ObservableObject {
             return
         }
         
-        guard let url = URL(string: "http://192.168.11.28:5000/upload") else {
+        guard let url = URL(string: "http://192.168.11.32:5000/upload") else {
             print("URLが不正です")
             return
         }
@@ -96,8 +99,17 @@ class AudioRecorder: ObservableObject {
             DispatchQueue.main.async {
                 self.feedbackMessage = json["feedback"] as? String ?? "コメントなし"
                 self.feedbackScore = json["score"] as? Int ?? 0
+                
+                if let pitchPath = json["pitch_image"] as? String,
+                   let volumePath = json["volume_image"] as? String {
+                    // サーバーのIPに合わせて完全URLを作成
+                    self.pitchImageURL = "http://192.168.11.32:5000/\(pitchPath)"
+                    self.volumeImageURL = "http://192.168.11.32:5000/\(volumePath)"
+                }
+                
                 print("サーバー応答:", self.feedbackMessage, self.feedbackScore)
             }
+
         }.resume()
     }
 }

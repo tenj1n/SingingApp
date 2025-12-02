@@ -3,16 +3,24 @@
 # Created by Koutarou Arima on 2025/07/01.
 
 from flask import Flask, request, jsonify
+from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
-
 from convert import convert_to_wav
-from analyze import extract_pitch_array  # ※ pitch配列だけ返す関数が必要
 from feedback import generate_feedback
+from analyze import extract_pitch_array, analyze_audio
+from flask import send_from_directory
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
+WAV_FOLDER = 'uploads_wav'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(WAV_FOLDER, exist_ok=True)
+
+# 画像を返すエンドポイント
+@app.route('/analysis/<filename>')
+def get_analysis_image(filename):
+    return send_from_directory('analysis', filename)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -29,27 +37,30 @@ def upload_file():
     save_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(save_path)
 
-    # ステップ1：.wav に変換
+    # WAV変換
     wav_path = convert_to_wav(save_path)
+    if not wav_path:
+        return "WAV変換失敗", 500
 
-    if wav_path is None:
-        return '変換失敗', 500
 
     # ステップ2：ピッチ配列を抽出
     pitch_array = extract_pitch_array(wav_path)
+    pitch_path, volume_path = analyze_audio(wav_path)  # PNG出力
+
     if pitch_array is None:
-        return 'ピッチ抽出失敗', 500
+        return "ピッチ解析失敗", 500
 
     # ステップ3：フィードバック生成
-    comment, score = generate_feedback(pitch_array)
+    feedback, score = generate_feedback(pitch_array)
 
     # レスポンスをJSON形式で返す
     return jsonify({
-        "message": "解析成功",
-        "filename": filename,
+        "feedback": feedback,
         "score": score,
-        "feedback": comment
+        "pitch_image": pitch_path,       # ← iOSで今は未使用だが保持
+        "volume_image": volume_path
     })
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

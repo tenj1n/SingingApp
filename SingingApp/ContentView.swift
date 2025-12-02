@@ -58,6 +58,31 @@ struct ContentView: View {
                 .bold()
             
             Spacer()
+            
+            if let url = URL(string: recorder.pitchImageURL) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 150)
+                } placeholder: {
+                    ProgressView()
+                }
+                .padding(.top)
+            }
+            
+            if let url = URL(string: recorder.volumeImageURL) {
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 150)
+                } placeholder: {
+                    ProgressView()
+                }
+                .padding(.bottom)
+            }
+
         }
         .padding()
     }

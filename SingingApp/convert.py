@@ -17,19 +17,13 @@ def convert_to_wav(input_path, output_dir='uploads_wav'):
     os.makedirs(output_dir, exist_ok=True)
 
     try:
-        # librosaで読み込み（sr=Noneで元のサンプリングレートを保持）
         y, sr = librosa.load(input_path, sr=None)
-
-        # 出力ファイルパスを生成
         base = os.path.basename(input_path)
         name = os.path.splitext(base)[0]
-        output_path = os.path.join(output_dir, f'{name}.wav')
-
-        # wavで保存
+        output_path = os.path.join('uploads_wav', f'{name}.wav') 
         sf.write(output_path, y, sr)
         print(f'変換成功: {output_path}')
         return output_path
-
     except Exception as e:
         print(f'変換失敗: {e}')
         return None

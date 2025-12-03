@@ -1,4 +1,4 @@
-# tools/01_user_pitch_extract_json.py
+# 01_user_pitch_extract_json.py
 import os, json
 from pathlib import Path
 import numpy as np

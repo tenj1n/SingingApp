@@ -1,0 +1,17 @@
+{
+  "tol_cents": 50.0,
+  "frames": 29549,
+  "seconds": 171.53,
+  "mean_cents": -1181.8,
+  "median_cents": -1228.9,
+  "std_cents": 569.4,
+  "percent_within_tol": 0.005,
+  "percent_low": 0.954,
+  "percent_high": 0.041,
+  "p10_cents": -1658.0,
+  "p90_cents": -777.2,
+  "unvoiced_miss_seconds": 19.57,
+  "verdict": "overall_low",
+  "reason": "全体にピッチが低め（音程が下に寄りがち）です。",
+  "tips": "息のスピードを少し速くし、口の中の天井を高めに意識。語尾で落ちないように、音の支えを保ったまま次の音へ。"
+}

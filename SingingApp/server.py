@@ -1,66 +1,167 @@
-#
-# server.py
-# Created by Koutarou Arima on 2025/07/01.
+# SingingApp/server.py
 
 from flask import Flask, request, jsonify
-from werkzeug.utils import secure_filename
-from datetime import datetime
-import os
-from convert import convert_to_wav
-from feedback import generate_feedback
-from analyze import extract_pitch_array, analyze_audio
-from flask import send_from_directory
+from flask_cors import CORS
+from pathlib import Path
+import uuid, json
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
-WAV_FOLDER = 'uploads_wav'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(WAV_FOLDER, exist_ok=True)
+CORS(app)
 
-# 画像を返すエンドポイント
-@app.route('/analysis/<filename>')
-def get_analysis_image(filename):
-    return send_from_directory('analysis', filename)
+# __file__ = .../SingingTrainerApp/SingingApp/SingingApp/server.py を想定
+# parent.parent = .../SingingTrainerApp/SingingApp （プロジェクトのルート）
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return 'ファイルがありません', 400
+# Xcode プロジェクト側のフォルダ（SingingApp 配下に analysis などがある想定）
+PROJECT_DIR = BASE_DIR / "SingingApp"
 
-    file = request.files['file']
-    if file.filename == '':
-        return 'ファイル名が空です', 400
+# 解析系ファイルを置いているディレクトリ
+ANALYSIS_DIR = PROJECT_DIR / "analysis"
 
-    # 保存先のパス
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"record_{timestamp}.m4a"
-    save_path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(save_path)
-
-    # WAV変換
-    wav_path = convert_to_wav(save_path)
-    if not wav_path:
-        return "WAV変換失敗", 500
+# 録音アップロード先 (例: SingingApp/analysis/user01/uploads)
+UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-    # ステップ2：ピッチ配列を抽出
-    pitch_array = extract_pitch_array(wav_path)
-    pitch_path, volume_path = analyze_audio(wav_path)  # PNG出力
-
-    if pitch_array is None:
-        return "ピッチ解析失敗", 500
-
-    # ステップ3：フィードバック生成
-    feedback, score = generate_feedback(pitch_array)
-
-    # レスポンスをJSON形式で返す
-    return jsonify({
-        "feedback": feedback,
-        "score": score,
-        "pitch_image": pitch_path,       # ← iOSで今は未使用だが保持
-        "volume_image": volume_path
-    })
+# --------------------------------------------------
+# 共通ヘルパー（「原因が追える」ように強化版）
+# --------------------------------------------------
+def json_error(status: int, code: str, message: str, **extra):
+    """エラーを必ず同じ形で返す"""
+    payload = {"ok": False, "code": code, "message": message}
+    if extra:
+        payload["extra"] = extra
+    return jsonify(payload), status
 
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+def read_json_or_error(path: Path, label: str):
+    """
+    JSON を読む。
+    - 無い → FileNotFoundError
+    - 壊れてる → ValueError
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"{label} not found: {path}")
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{label} invalid JSON: {path} ({e})")
+
+
+def safe_len(x):
+    return len(x) if isinstance(x, list) else None
+
+
+# --------------------------------------------------
+# ヘルスチェック
+# --------------------------------------------------
+@app.get("/health")
+def health():
+    return jsonify({"ok": True, "service": "singing-backend"})
+
+
+# --------------------------------------------------
+# 録音ファイルアップロード
+# --------------------------------------------------
+@app.post("/upload")
+def upload():
+    """
+    マルチパートで audio ファイルを受け取って保存する。
+    フィールド名: 'audio' （iOS 側からこれで送る）
+    """
+    if "audio" not in request.files:
+        return jsonify({"ok": False, "error": "no 'audio' field"}), 400
+
+    f = request.files["audio"]
+    if not f.filename:
+        return jsonify({"ok": False, "error": "empty filename"}), 400
+
+    ext = (Path(f.filename).suffix or ".m4a").lower()
+    file_id = str(uuid.uuid4())
+    out_path = UPLOAD_DIR / f"{file_id}{ext}"
+    f.save(out_path)
+
+    return jsonify(
+        {
+            "ok": True,
+            "file_id": file_id,
+            "saved_path": str(out_path),
+            "note": "保存のみ。解析は別エンドポイントで行う想定。",
+        }
+    )
+
+
+# --------------------------------------------------
+# 解析結果をまとめて返す API（デバッグ強化版）
+# 例: /api/analysis/orphans/user01
+# --------------------------------------------------
+@app.get("/api/analysis/<song_id>/<user_id>")
+def get_analysis(song_id: str, user_id: str):
+    """
+    1回のリクエストでまとめて返す:
+      - ref_pitch:  analysis/songs/<song_id>/ref/pitch.json
+      - usr_pitch:  analysis/<user_id>/pitch.json
+      - events:     analysis/<user_id>/events.json
+      - summary:    analysis/<user_id>/summary.json
+    """
+    try:
+        # パスを組み立てる（ここが“1-2の本体”）
+        ref_pitch_path = ANALYSIS_DIR / "songs" / song_id / "ref" / "pitch.json"
+
+        usr_dir = ANALYSIS_DIR / user_id
+        usr_pitch_path = usr_dir / "pitch.json"
+        events_path = usr_dir / "events.json"
+        summary_path = usr_dir / "summary.json"
+
+        # JSONを読む（無い/壊れたら例外 → 下の except へ）
+        ref_pitch = read_json_or_error(ref_pitch_path, "ref_pitch")
+        usr_pitch = read_json_or_error(usr_pitch_path, "usr_pitch")
+        events = read_json_or_error(events_path, "events")
+        summary = read_json_or_error(summary_path, "summary")
+
+        # “何を読んだか”がすぐ分かるメタ情報
+        resp = {
+            "ok": True,
+            "session_id": f"demo-{song_id}-{user_id}",
+            "song_id": song_id,
+            "user_id": user_id,
+            "ref_pitch": ref_pitch,
+            "usr_pitch": usr_pitch,
+            "events": events,
+            "summary": summary,
+            "meta": {
+                "paths": {
+                    "ref_pitch": str(ref_pitch_path),
+                    "usr_pitch": str(usr_pitch_path),
+                    "events": str(events_path),
+                    "summary": str(summary_path),
+                },
+                "sizes": {
+                    "ref_pitch_bytes": ref_pitch_path.stat().st_size,
+                    "usr_pitch_bytes": usr_pitch_path.stat().st_size,
+                    "events_bytes": events_path.stat().st_size,
+                    "summary_bytes": summary_path.stat().st_size,
+                },
+                "counts": {
+                    "ref_track": safe_len(ref_pitch.get("track")) if isinstance(ref_pitch, dict) else None,
+                    "usr_track": safe_len(usr_pitch.get("track")) if isinstance(usr_pitch, dict) else None,
+                    "events": safe_len(events),
+                },
+            },
+        }
+        return jsonify(resp)
+
+    except FileNotFoundError as e:
+        return json_error(404, "FILE_NOT_FOUND", str(e))
+    except ValueError as e:
+        return json_error(500, "INVALID_JSON", str(e))
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# --------------------------------------------------
+# ローカル実行
+# --------------------------------------------------
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=True)

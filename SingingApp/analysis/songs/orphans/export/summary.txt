@@ -1,0 +1,13 @@
+=== Pitch overall summary ===
+Data seconds      : 200.57 s
+Tolerance         : ±40 cents
+Median / Mean     : 0.0 c / 0.0 c
+Std (spread)      : 0.0 c
+Within tolerance  : 100.0%
+Too low / high    : 0.0% / 0.0%
+p10 / p90         : -0.0 c / 0.0 c
+Unvoiced-miss     : 24.93 s
+
+Verdict: mostly_ok
+Summary: おおむね基準に近いピッチで歌えています。
+Tips   : 細かいズレを減らすために、語尾の処理と次の音への入りだけを重点チェック。

@@ -1,0 +1,1941 @@
+[
+  {
+    "start": 13.642,
+    "end": 14.025,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 24.805,
+    "end": 25.118,
+    "type": "pitch_low",
+    "avg_cents": -1200.1,
+    "max_cents": -1276.3
+  },
+  {
+    "start": 25.937,
+    "end": 26.291,
+    "type": "pitch_low",
+    "avg_cents": -1347.3,
+    "max_cents": -1928.1
+  },
+  {
+    "start": 26.465,
+    "end": 26.686,
+    "type": "pitch_low",
+    "avg_cents": -733.7,
+    "max_cents": -1575.8
+  },
+  {
+    "start": 26.86,
+    "end": 27.301,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 27.307,
+    "end": 27.783,
+    "type": "pitch_low",
+    "avg_cents": -1538.4,
+    "max_cents": -2283.3
+  },
+  {
+    "start": 28.085,
+    "end": 28.532,
+    "type": "pitch_low",
+    "avg_cents": -1008.3,
+    "max_cents": -1288.4
+  },
+  {
+    "start": 28.601,
+    "end": 29.309,
+    "type": "pitch_low",
+    "avg_cents": -1130.9,
+    "max_cents": -2043.9
+  },
+  {
+    "start": 29.396,
+    "end": 30.151,
+    "type": "pitch_low",
+    "avg_cents": -1785.4,
+    "max_cents": -3469.5
+  },
+  {
+    "start": 30.494,
+    "end": 30.784,
+    "type": "pitch_low",
+    "avg_cents": -1674.4,
+    "max_cents": -1972.7
+  },
+  {
+    "start": 31.196,
+    "end": 31.643,
+    "type": "pitch_low",
+    "avg_cents": -1020.2,
+    "max_cents": -1713.8
+  },
+  {
+    "start": 31.649,
+    "end": 32.067,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 32.073,
+    "end": 32.305,
+    "type": "pitch_low",
+    "avg_cents": -1088.5,
+    "max_cents": -1280.4
+  },
+  {
+    "start": 32.827,
+    "end": 33.245,
+    "type": "pitch_low",
+    "avg_cents": -1412.8,
+    "max_cents": -1535.6
+  },
+  {
+    "start": 33.367,
+    "end": 35.341,
+    "type": "pitch_low",
+    "avg_cents": -1105.7,
+    "max_cents": -1862.7
+  },
+  {
+    "start": 35.405,
+    "end": 36.084,
+    "type": "pitch_low",
+    "avg_cents": -1210.9,
+    "max_cents": -1515.0
+  },
+  {
+    "start": 36.159,
+    "end": 36.618,
+    "type": "pitch_low",
+    "avg_cents": -1211.4,
+    "max_cents": -2230.0
+  },
+  {
+    "start": 36.624,
+    "end": 37.198,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 37.204,
+    "end": 37.402,
+    "type": "pitch_low",
+    "avg_cents": -1078.1,
+    "max_cents": -1663.9
+  },
+  {
+    "start": 37.999,
+    "end": 38.278,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 38.284,
+    "end": 38.812,
+    "type": "pitch_low",
+    "avg_cents": -1180.2,
+    "max_cents": -1657.6
+  },
+  {
+    "start": 39.079,
+    "end": 39.398,
+    "type": "pitch_low",
+    "avg_cents": -1440.0,
+    "max_cents": -1550.0
+  },
+  {
+    "start": 39.567,
+    "end": 39.869,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 39.886,
+    "end": 40.089,
+    "type": "pitch_low",
+    "avg_cents": -1135.6,
+    "max_cents": -1683.9
+  },
+  {
+    "start": 40.577,
+    "end": 40.815,
+    "type": "pitch_low",
+    "avg_cents": -1101.4,
+    "max_cents": -2247.9
+  },
+  {
+    "start": 40.867,
+    "end": 41.79,
+    "type": "pitch_low",
+    "avg_cents": -1236.7,
+    "max_cents": -2676.0
+  },
+  {
+    "start": 41.976,
+    "end": 42.411,
+    "type": "pitch_low",
+    "avg_cents": -1820.7,
+    "max_cents": -2179.5
+  },
+  {
+    "start": 43.746,
+    "end": 44.28,
+    "type": "pitch_low",
+    "avg_cents": -1038.7,
+    "max_cents": -1227.7
+  },
+  {
+    "start": 44.286,
+    "end": 44.588,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 45.32,
+    "end": 45.517,
+    "type": "pitch_low",
+    "avg_cents": -1064.4,
+    "max_cents": -1098.6
+  },
+  {
+    "start": 45.558,
+    "end": 46.539,
+    "type": "pitch_low",
+    "avg_cents": -1368.1,
+    "max_cents": -1778.3
+  },
+  {
+    "start": 46.684,
+    "end": 48.402,
+    "type": "pitch_low",
+    "avg_cents": -1292.2,
+    "max_cents": -1638.7
+  },
+  {
+    "start": 48.408,
+    "end": 48.681,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 50.637,
+    "end": 54.753,
+    "type": "pitch_low",
+    "avg_cents": -1213.3,
+    "max_cents": -1415.7
+  },
+  {
+    "start": 54.758,
+    "end": 55.6,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 56.9,
+    "end": 57.702,
+    "type": "pitch_low",
+    "avg_cents": -1458.1,
+    "max_cents": -1843.8
+  },
+  {
+    "start": 57.847,
+    "end": 58.897,
+    "type": "pitch_low",
+    "avg_cents": -1419.7,
+    "max_cents": -1920.3
+  },
+  {
+    "start": 59.014,
+    "end": 59.385,
+    "type": "pitch_low",
+    "avg_cents": -974.2,
+    "max_cents": -1179.2
+  },
+  {
+    "start": 59.716,
+    "end": 60.006,
+    "type": "pitch_low",
+    "avg_cents": -1045.0,
+    "max_cents": -1101.8
+  },
+  {
+    "start": 60.018,
+    "end": 60.801,
+    "type": "pitch_low",
+    "avg_cents": -1174.2,
+    "max_cents": -1496.6
+  },
+  {
+    "start": 62.456,
+    "end": 64.395,
+    "type": "pitch_low",
+    "avg_cents": -1244.9,
+    "max_cents": -1464.7
+  },
+  {
+    "start": 64.401,
+    "end": 64.981,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 65.753,
+    "end": 65.968,
+    "type": "pitch_low",
+    "avg_cents": -1077.1,
+    "max_cents": -1632.4
+  },
+  {
+    "start": 66.014,
+    "end": 67.117,
+    "type": "pitch_low",
+    "avg_cents": -1632.0,
+    "max_cents": -2598.2
+  },
+  {
+    "start": 68.592,
+    "end": 69.039,
+    "type": "pitch_low",
+    "avg_cents": -1025.3,
+    "max_cents": -1152.3
+  },
+  {
+    "start": 69.137,
+    "end": 69.915,
+    "type": "pitch_low",
+    "avg_cents": -1147.3,
+    "max_cents": -1307.0
+  },
+  {
+    "start": 69.921,
+    "end": 70.177,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 71.755,
+    "end": 72.191,
+    "type": "pitch_low",
+    "avg_cents": -1365.0,
+    "max_cents": -2797.9
+  },
+  {
+    "start": 72.266,
+    "end": 72.493,
+    "type": "pitch_low",
+    "avg_cents": -2010.8,
+    "max_cents": -2243.8
+  },
+  {
+    "start": 72.574,
+    "end": 73.387,
+    "type": "pitch_low",
+    "avg_cents": -1397.4,
+    "max_cents": -1657.8
+  },
+  {
+    "start": 73.392,
+    "end": 73.822,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 75.111,
+    "end": 75.564,
+    "type": "pitch_low",
+    "avg_cents": -1111.9,
+    "max_cents": -1250.2
+  },
+  {
+    "start": 75.674,
+    "end": 76.405,
+    "type": "pitch_low",
+    "avg_cents": -1456.1,
+    "max_cents": -1896.7
+  },
+  {
+    "start": 76.469,
+    "end": 77.172,
+    "type": "pitch_low",
+    "avg_cents": -923.9,
+    "max_cents": -1245.1
+  },
+  {
+    "start": 77.235,
+    "end": 77.7,
+    "type": "pitch_low",
+    "avg_cents": -991.4,
+    "max_cents": -1753.0
+  },
+  {
+    "start": 77.816,
+    "end": 78.472,
+    "type": "pitch_low",
+    "avg_cents": -1485.0,
+    "max_cents": -1903.1
+  },
+  {
+    "start": 78.518,
+    "end": 79.848,
+    "type": "pitch_low",
+    "avg_cents": -1387.1,
+    "max_cents": -2092.3
+  },
+  {
+    "start": 79.853,
+    "end": 80.329,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 80.335,
+    "end": 80.666,
+    "type": "pitch_low",
+    "avg_cents": -385.8,
+    "max_cents": -614.6
+  },
+  {
+    "start": 81.212,
+    "end": 81.914,
+    "type": "pitch_low",
+    "avg_cents": -1423.8,
+    "max_cents": -1648.8
+  },
+  {
+    "start": 81.949,
+    "end": 82.355,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 82.367,
+    "end": 82.669,
+    "type": "pitch_low",
+    "avg_cents": -1182.7,
+    "max_cents": -1343.6
+  },
+  {
+    "start": 83.174,
+    "end": 83.383,
+    "type": "pitch_low",
+    "avg_cents": -1501.3,
+    "max_cents": -3398.9
+  },
+  {
+    "start": 83.487,
+    "end": 84.23,
+    "type": "pitch_low",
+    "avg_cents": -1759.8,
+    "max_cents": -2777.8
+  },
+  {
+    "start": 84.283,
+    "end": 84.782,
+    "type": "pitch_low",
+    "avg_cents": -1388.5,
+    "max_cents": -2425.9
+  },
+  {
+    "start": 84.799,
+    "end": 85.02,
+    "type": "pitch_low",
+    "avg_cents": -1065.0,
+    "max_cents": -1132.0
+  },
+  {
+    "start": 85.049,
+    "end": 86.111,
+    "type": "pitch_low",
+    "avg_cents": -1219.7,
+    "max_cents": -2268.9
+  },
+  {
+    "start": 86.117,
+    "end": 86.877,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 87.702,
+    "end": 88.677,
+    "type": "pitch_low",
+    "avg_cents": -1295.3,
+    "max_cents": -1807.0
+  },
+  {
+    "start": 89.211,
+    "end": 89.42,
+    "type": "pitch_low",
+    "avg_cents": -897.8,
+    "max_cents": -917.6
+  },
+  {
+    "start": 89.466,
+    "end": 89.664,
+    "type": "pitch_low",
+    "avg_cents": -755.3,
+    "max_cents": -1120.1
+  },
+  {
+    "start": 89.786,
+    "end": 90.012,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 90.018,
+    "end": 90.749,
+    "type": "pitch_low",
+    "avg_cents": -1556.9,
+    "max_cents": -1974.7
+  },
+  {
+    "start": 90.831,
+    "end": 91.254,
+    "type": "pitch_low",
+    "avg_cents": -1104.5,
+    "max_cents": -1378.7
+  },
+  {
+    "start": 91.324,
+    "end": 91.556,
+    "type": "pitch_low",
+    "avg_cents": -1279.2,
+    "max_cents": -2205.6
+  },
+  {
+    "start": 91.62,
+    "end": 92.061,
+    "type": "pitch_low",
+    "avg_cents": -1489.5,
+    "max_cents": -1593.1
+  },
+  {
+    "start": 92.119,
+    "end": 92.375,
+    "type": "pitch_low",
+    "avg_cents": -1838.1,
+    "max_cents": -3396.1
+  },
+  {
+    "start": 92.421,
+    "end": 92.874,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 92.88,
+    "end": 93.275,
+    "type": "pitch_low",
+    "avg_cents": -457.3,
+    "max_cents": -953.5
+  },
+  {
+    "start": 93.623,
+    "end": 94.563,
+    "type": "pitch_low",
+    "avg_cents": -1461.5,
+    "max_cents": -1829.1
+  },
+  {
+    "start": 94.569,
+    "end": 94.923,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 94.929,
+    "end": 95.922,
+    "type": "pitch_low",
+    "avg_cents": -763.6,
+    "max_cents": -1442.6
+  },
+  {
+    "start": 96.015,
+    "end": 96.891,
+    "type": "pitch_low",
+    "avg_cents": -1855.4,
+    "max_cents": -2569.9
+  },
+  {
+    "start": 96.914,
+    "end": 97.338,
+    "type": "pitch_low",
+    "avg_cents": -1294.0,
+    "max_cents": -2216.7
+  },
+  {
+    "start": 97.35,
+    "end": 98.522,
+    "type": "pitch_low",
+    "avg_cents": -1157.5,
+    "max_cents": -1382.0
+  },
+  {
+    "start": 98.528,
+    "end": 99.161,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 99.95,
+    "end": 100.676,
+    "type": "pitch_low",
+    "avg_cents": -1280.5,
+    "max_cents": -2215.1
+  },
+  {
+    "start": 100.757,
+    "end": 101.013,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 101.036,
+    "end": 101.593,
+    "type": "pitch_low",
+    "avg_cents": -1261.5,
+    "max_cents": -2510.2
+  },
+  {
+    "start": 101.796,
+    "end": 102.179,
+    "type": "pitch_low",
+    "avg_cents": -1138.8,
+    "max_cents": -1587.2
+  },
+  {
+    "start": 102.58,
+    "end": 102.777,
+    "type": "pitch_low",
+    "avg_cents": -1880.1,
+    "max_cents": -2085.1
+  },
+  {
+    "start": 102.853,
+    "end": 103.062,
+    "type": "pitch_low",
+    "avg_cents": -1546.9,
+    "max_cents": -1701.7
+  },
+  {
+    "start": 103.323,
+    "end": 103.567,
+    "type": "pitch_low",
+    "avg_cents": -905.5,
+    "max_cents": -1000.5
+  },
+  {
+    "start": 103.631,
+    "end": 105.332,
+    "type": "pitch_low",
+    "avg_cents": -1395.9,
+    "max_cents": -2638.3
+  },
+  {
+    "start": 105.337,
+    "end": 105.674,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 105.726,
+    "end": 106.127,
+    "type": "pitch_low",
+    "avg_cents": -1664.4,
+    "max_cents": -2018.7
+  },
+  {
+    "start": 106.504,
+    "end": 106.94,
+    "type": "pitch_low",
+    "avg_cents": -1065.9,
+    "max_cents": -1266.8
+  },
+  {
+    "start": 106.945,
+    "end": 107.311,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 107.317,
+    "end": 107.59,
+    "type": "pitch_low",
+    "avg_cents": -1036.7,
+    "max_cents": -1140.8
+  },
+  {
+    "start": 108.054,
+    "end": 110.62,
+    "type": "pitch_low",
+    "avg_cents": -1194.0,
+    "max_cents": -2397.3
+  },
+  {
+    "start": 110.69,
+    "end": 111.171,
+    "type": "pitch_low",
+    "avg_cents": -1291.5,
+    "max_cents": -1455.3
+  },
+  {
+    "start": 111.473,
+    "end": 111.798,
+    "type": "pitch_low",
+    "avg_cents": -1113.1,
+    "max_cents": -1578.8
+  },
+  {
+    "start": 111.804,
+    "end": 112.396,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 112.402,
+    "end": 112.75,
+    "type": "pitch_low",
+    "avg_cents": -829.2,
+    "max_cents": -1536.0
+  },
+  {
+    "start": 113.273,
+    "end": 113.517,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 113.522,
+    "end": 114.045,
+    "type": "pitch_low",
+    "avg_cents": -1183.9,
+    "max_cents": -1641.0
+  },
+  {
+    "start": 114.329,
+    "end": 114.544,
+    "type": "pitch_low",
+    "avg_cents": -858.7,
+    "max_cents": -1513.3
+  },
+  {
+    "start": 114.828,
+    "end": 115.107,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 115.223,
+    "end": 115.583,
+    "type": "pitch_low",
+    "avg_cents": -1173.7,
+    "max_cents": -1568.8
+  },
+  {
+    "start": 115.908,
+    "end": 116.39,
+    "type": "pitch_low",
+    "avg_cents": -1002.5,
+    "max_cents": -1676.5
+  },
+  {
+    "start": 116.698,
+    "end": 117.383,
+    "type": "pitch_low",
+    "avg_cents": -1288.6,
+    "max_cents": -2818.1
+  },
+  {
+    "start": 117.574,
+    "end": 117.969,
+    "type": "pitch_low",
+    "avg_cents": -1537.2,
+    "max_cents": -2166.4
+  },
+  {
+    "start": 118.335,
+    "end": 118.683,
+    "type": "pitch_low",
+    "avg_cents": -1457.0,
+    "max_cents": -1814.3
+  },
+  {
+    "start": 119.072,
+    "end": 119.513,
+    "type": "pitch_low",
+    "avg_cents": -1004.5,
+    "max_cents": -1181.6
+  },
+  {
+    "start": 119.519,
+    "end": 119.873,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 119.879,
+    "end": 120.082,
+    "type": "pitch_low",
+    "avg_cents": -1077.8,
+    "max_cents": -1266.2
+  },
+  {
+    "start": 120.599,
+    "end": 120.825,
+    "type": "pitch_low",
+    "avg_cents": -1109.4,
+    "max_cents": -1314.5
+  },
+  {
+    "start": 120.86,
+    "end": 121.87,
+    "type": "pitch_low",
+    "avg_cents": -1334.8,
+    "max_cents": -1766.8
+  },
+  {
+    "start": 121.98,
+    "end": 123.414,
+    "type": "pitch_low",
+    "avg_cents": -1366.0,
+    "max_cents": -1714.8
+  },
+  {
+    "start": 123.484,
+    "end": 123.995,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 125.26,
+    "end": 125.666,
+    "type": "pitch_low",
+    "avg_cents": -1287.1,
+    "max_cents": -1561.4
+  },
+  {
+    "start": 125.957,
+    "end": 126.154,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 126.16,
+    "end": 126.642,
+    "type": "pitch_low",
+    "avg_cents": -1129.4,
+    "max_cents": -1644.9
+  },
+  {
+    "start": 126.874,
+    "end": 127.437,
+    "type": "pitch_low",
+    "avg_cents": -1348.0,
+    "max_cents": -1961.6
+  },
+  {
+    "start": 127.443,
+    "end": 127.721,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 127.75,
+    "end": 128.168,
+    "type": "pitch_low",
+    "avg_cents": -1407.8,
+    "max_cents": -1695.1
+  },
+  {
+    "start": 128.383,
+    "end": 128.964,
+    "type": "pitch_low",
+    "avg_cents": -887.5,
+    "max_cents": -1086.8
+  },
+  {
+    "start": 128.998,
+    "end": 129.498,
+    "type": "pitch_low",
+    "avg_cents": -969.1,
+    "max_cents": -1287.6
+  },
+  {
+    "start": 129.538,
+    "end": 130.223,
+    "type": "pitch_low",
+    "avg_cents": -1356.5,
+    "max_cents": -2889.4
+  },
+  {
+    "start": 130.247,
+    "end": 130.63,
+    "type": "pitch_low",
+    "avg_cents": -1791.8,
+    "max_cents": -2106.3
+  },
+  {
+    "start": 132.394,
+    "end": 132.69,
+    "type": "pitch_low",
+    "avg_cents": -1151.0,
+    "max_cents": -1894.7
+  },
+  {
+    "start": 133.161,
+    "end": 133.503,
+    "type": "pitch_low",
+    "avg_cents": -1440.6,
+    "max_cents": -1606.9
+  },
+  {
+    "start": 133.648,
+    "end": 134.467,
+    "type": "pitch_low",
+    "avg_cents": -789.2,
+    "max_cents": -2575.6
+  },
+  {
+    "start": 134.478,
+    "end": 135.187,
+    "type": "pitch_low",
+    "avg_cents": -1493.1,
+    "max_cents": -1917.7
+  },
+  {
+    "start": 135.256,
+    "end": 135.79,
+    "type": "pitch_low",
+    "avg_cents": -1417.8,
+    "max_cents": -1897.6
+  },
+  {
+    "start": 136.034,
+    "end": 136.516,
+    "type": "pitch_low",
+    "avg_cents": -1151.2,
+    "max_cents": -2375.2
+  },
+  {
+    "start": 136.574,
+    "end": 136.934,
+    "type": "pitch_low",
+    "avg_cents": -1015.9,
+    "max_cents": -2401.3
+  },
+  {
+    "start": 136.986,
+    "end": 137.503,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 138.321,
+    "end": 138.594,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 138.664,
+    "end": 139.192,
+    "type": "pitch_low",
+    "avg_cents": -1198.1,
+    "max_cents": -1320.8
+  },
+  {
+    "start": 139.436,
+    "end": 139.918,
+    "type": "pitch_low",
+    "avg_cents": -1338.1,
+    "max_cents": -2486.9
+  },
+  {
+    "start": 139.947,
+    "end": 140.272,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 140.278,
+    "end": 140.73,
+    "type": "pitch_low",
+    "avg_cents": -1355.1,
+    "max_cents": -1757.3
+  },
+  {
+    "start": 140.997,
+    "end": 141.491,
+    "type": "pitch_low",
+    "avg_cents": -966.7,
+    "max_cents": -1099.1
+  },
+  {
+    "start": 141.566,
+    "end": 142.466,
+    "type": "pitch_low",
+    "avg_cents": -1120.5,
+    "max_cents": -1563.3
+  },
+  {
+    "start": 142.501,
+    "end": 142.919,
+    "type": "pitch_low",
+    "avg_cents": -2019.0,
+    "max_cents": -2933.1
+  },
+  {
+    "start": 143.372,
+    "end": 143.673,
+    "type": "pitch_low",
+    "avg_cents": -1644.4,
+    "max_cents": -2073.4
+  },
+  {
+    "start": 144.12,
+    "end": 144.66,
+    "type": "pitch_low",
+    "avg_cents": -1046.7,
+    "max_cents": -1239.3
+  },
+  {
+    "start": 144.666,
+    "end": 144.991,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 144.997,
+    "end": 145.2,
+    "type": "pitch_low",
+    "avg_cents": -1174.9,
+    "max_cents": -2260.5
+  },
+  {
+    "start": 145.711,
+    "end": 145.92,
+    "type": "pitch_low",
+    "avg_cents": -1149.7,
+    "max_cents": -1219.9
+  },
+  {
+    "start": 145.943,
+    "end": 147.232,
+    "type": "pitch_low",
+    "avg_cents": -1470.8,
+    "max_cents": -2389.1
+  },
+  {
+    "start": 147.377,
+    "end": 148.991,
+    "type": "pitch_low",
+    "avg_cents": -1323.8,
+    "max_cents": -1602.0
+  },
+  {
+    "start": 149.026,
+    "end": 149.566,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 162.905,
+    "end": 163.172,
+    "type": "pitch_low",
+    "avg_cents": -859.2,
+    "max_cents": -1196.2
+  },
+  {
+    "start": 163.498,
+    "end": 163.718,
+    "type": "pitch_low",
+    "avg_cents": -1344.0,
+    "max_cents": -2261.2
+  },
+  {
+    "start": 163.77,
+    "end": 164.42,
+    "type": "pitch_low",
+    "avg_cents": -1467.9,
+    "max_cents": -2655.1
+  },
+  {
+    "start": 164.502,
+    "end": 165.059,
+    "type": "pitch_low",
+    "avg_cents": -848.3,
+    "max_cents": -2275.2
+  },
+  {
+    "start": 165.082,
+    "end": 165.576,
+    "type": "pitch_low",
+    "avg_cents": -1072.1,
+    "max_cents": -1497.9
+  },
+  {
+    "start": 165.837,
+    "end": 166.615,
+    "type": "pitch_low",
+    "avg_cents": -1343.2,
+    "max_cents": -2936.8
+  },
+  {
+    "start": 166.748,
+    "end": 167.805,
+    "type": "pitch_low",
+    "avg_cents": -1563.6,
+    "max_cents": -1958.6
+  },
+  {
+    "start": 167.962,
+    "end": 168.176,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 168.252,
+    "end": 168.565,
+    "type": "pitch_low",
+    "avg_cents": -454.3,
+    "max_cents": -1750.7
+  },
+  {
+    "start": 168.995,
+    "end": 170.44,
+    "type": "pitch_low",
+    "avg_cents": -1362.8,
+    "max_cents": -1638.6
+  },
+  {
+    "start": 170.539,
+    "end": 171.294,
+    "type": "pitch_low",
+    "avg_cents": -806.6,
+    "max_cents": -2529.8
+  },
+  {
+    "start": 171.392,
+    "end": 171.915,
+    "type": "pitch_low",
+    "avg_cents": -1553.5,
+    "max_cents": -2665.4
+  },
+  {
+    "start": 171.938,
+    "end": 172.64,
+    "type": "pitch_low",
+    "avg_cents": -1472.3,
+    "max_cents": -2099.8
+  },
+  {
+    "start": 172.71,
+    "end": 173.987,
+    "type": "pitch_low",
+    "avg_cents": -1134.2,
+    "max_cents": -1319.1
+  },
+  {
+    "start": 173.993,
+    "end": 174.475,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 175.531,
+    "end": 176.483,
+    "type": "pitch_low",
+    "avg_cents": -1306.9,
+    "max_cents": -1794.3
+  },
+  {
+    "start": 176.826,
+    "end": 177.29,
+    "type": "pitch_low",
+    "avg_cents": -1101.8,
+    "max_cents": -1323.5
+  },
+  {
+    "start": 177.319,
+    "end": 177.522,
+    "type": "pitch_low",
+    "avg_cents": -689.9,
+    "max_cents": -988.7
+  },
+  {
+    "start": 177.551,
+    "end": 178.585,
+    "type": "pitch_low",
+    "avg_cents": -1472.2,
+    "max_cents": -2095.1
+  },
+  {
+    "start": 178.596,
+    "end": 179.612,
+    "type": "pitch_low",
+    "avg_cents": -1205.7,
+    "max_cents": -2472.1
+  },
+  {
+    "start": 179.67,
+    "end": 180.309,
+    "type": "pitch_low",
+    "avg_cents": -1698.9,
+    "max_cents": -2063.6
+  },
+  {
+    "start": 180.489,
+    "end": 180.744,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 180.86,
+    "end": 181.069,
+    "type": "pitch_low",
+    "avg_cents": -283.7,
+    "max_cents": -422.6
+  },
+  {
+    "start": 181.429,
+    "end": 183.472,
+    "type": "pitch_low",
+    "avg_cents": -1166.2,
+    "max_cents": -1752.4
+  },
+  {
+    "start": 183.531,
+    "end": 183.728,
+    "type": "pitch_low",
+    "avg_cents": -1043.0,
+    "max_cents": -1212.1
+  },
+  {
+    "start": 183.792,
+    "end": 184.337,
+    "type": "pitch_low",
+    "avg_cents": -1735.6,
+    "max_cents": -2407.1
+  },
+  {
+    "start": 184.407,
+    "end": 185.185,
+    "type": "pitch_low",
+    "avg_cents": -1577.6,
+    "max_cents": -2787.3
+  },
+  {
+    "start": 185.197,
+    "end": 186.439,
+    "type": "pitch_low",
+    "avg_cents": -1145.5,
+    "max_cents": -1318.9
+  },
+  {
+    "start": 186.445,
+    "end": 187.002,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 187.031,
+    "end": 187.281,
+    "type": "pitch_low",
+    "avg_cents": -776.8,
+    "max_cents": -922.8
+  },
+  {
+    "start": 187.931,
+    "end": 188.366,
+    "type": "pitch_low",
+    "avg_cents": -1276.2,
+    "max_cents": -1610.4
+  },
+  {
+    "start": 188.587,
+    "end": 189.045,
+    "type": "pitch_low",
+    "avg_cents": -1448.1,
+    "max_cents": -2169.3
+  },
+  {
+    "start": 189.068,
+    "end": 189.428,
+    "type": "pitch_low",
+    "avg_cents": -1250.3,
+    "max_cents": -1668.2
+  },
+  {
+    "start": 189.649,
+    "end": 189.846,
+    "type": "pitch_low",
+    "avg_cents": -1494.4,
+    "max_cents": -1616.6
+  },
+  {
+    "start": 189.864,
+    "end": 190.206,
+    "type": "pitch_low",
+    "avg_cents": -1500.1,
+    "max_cents": -2652.0
+  },
+  {
+    "start": 190.212,
+    "end": 190.497,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 191.199,
+    "end": 191.42,
+    "type": "pitch_low",
+    "avg_cents": -847.8,
+    "max_cents": -887.9
+  },
+  {
+    "start": 191.733,
+    "end": 192.441,
+    "type": "pitch_low",
+    "avg_cents": -1141.9,
+    "max_cents": -1709.5
+  },
+  {
+    "start": 192.517,
+    "end": 193.248,
+    "type": "pitch_low",
+    "avg_cents": -1834.8,
+    "max_cents": -3725.0
+  },
+  {
+    "start": 193.254,
+    "end": 193.556,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 193.643,
+    "end": 193.881,
+    "type": "pitch_low",
+    "avg_cents": -1849.9,
+    "max_cents": -2224.6
+  },
+  {
+    "start": 194.38,
+    "end": 194.781,
+    "type": "pitch_low",
+    "avg_cents": -1080.4,
+    "max_cents": -1262.3
+  },
+  {
+    "start": 195.866,
+    "end": 196.11,
+    "type": "pitch_low",
+    "avg_cents": -1454.9,
+    "max_cents": -1612.8
+  },
+  {
+    "start": 196.487,
+    "end": 197.132,
+    "type": "pitch_low",
+    "avg_cents": -501.4,
+    "max_cents": -936.1
+  },
+  {
+    "start": 197.23,
+    "end": 198.484,
+    "type": "pitch_low",
+    "avg_cents": -1431.8,
+    "max_cents": -2220.5
+  },
+  {
+    "start": 198.525,
+    "end": 198.896,
+    "type": "pitch_low",
+    "avg_cents": -1407.0,
+    "max_cents": -1650.6
+  },
+  {
+    "start": 199.732,
+    "end": 200.359,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 200.365,
+    "end": 200.667,
+    "type": "pitch_low",
+    "avg_cents": -666.1,
+    "max_cents": -784.7
+  },
+  {
+    "start": 201.12,
+    "end": 201.346,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 201.387,
+    "end": 201.88,
+    "type": "pitch_low",
+    "avg_cents": -1176.4,
+    "max_cents": -2346.0
+  },
+  {
+    "start": 202.118,
+    "end": 202.542,
+    "type": "pitch_low",
+    "avg_cents": -1534.1,
+    "max_cents": -2104.3
+  },
+  {
+    "start": 202.699,
+    "end": 202.913,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 203.244,
+    "end": 203.488,
+    "type": "pitch_low",
+    "avg_cents": -1409.5,
+    "max_cents": -1463.0
+  },
+  {
+    "start": 203.738,
+    "end": 203.952,
+    "type": "pitch_low",
+    "avg_cents": -907.0,
+    "max_cents": -1753.2
+  },
+  {
+    "start": 203.981,
+    "end": 204.945,
+    "type": "pitch_low",
+    "avg_cents": -1203.7,
+    "max_cents": -2687.2
+  },
+  {
+    "start": 205.079,
+    "end": 205.52,
+    "type": "pitch_low",
+    "avg_cents": -1671.9,
+    "max_cents": -2013.7
+  },
+  {
+    "start": 205.578,
+    "end": 205.775,
+    "type": "pitch_low",
+    "avg_cents": -1719.8,
+    "max_cents": -1807.5
+  },
+  {
+    "start": 206.176,
+    "end": 206.414,
+    "type": "pitch_low",
+    "avg_cents": -1707.9,
+    "max_cents": -2268.8
+  },
+  {
+    "start": 206.907,
+    "end": 207.337,
+    "type": "pitch_low",
+    "avg_cents": -967.1,
+    "max_cents": -1095.1
+  },
+  {
+    "start": 207.343,
+    "end": 207.702,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 208.411,
+    "end": 208.649,
+    "type": "pitch_low",
+    "avg_cents": -1424.5,
+    "max_cents": -1916.7
+  },
+  {
+    "start": 208.707,
+    "end": 208.956,
+    "type": "pitch_low",
+    "avg_cents": -890.6,
+    "max_cents": -926.2
+  },
+  {
+    "start": 208.962,
+    "end": 209.252,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 209.281,
+    "end": 209.665,
+    "type": "pitch_low",
+    "avg_cents": -1708.3,
+    "max_cents": -2128.7
+  },
+  {
+    "start": 210.129,
+    "end": 210.5,
+    "type": "pitch_low",
+    "avg_cents": -1029.0,
+    "max_cents": -1173.9
+  },
+  {
+    "start": 210.506,
+    "end": 210.872,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 211.511,
+    "end": 211.801,
+    "type": "pitch_low",
+    "avg_cents": -1289.6,
+    "max_cents": -1882.4
+  },
+  {
+    "start": 211.853,
+    "end": 212.085,
+    "type": "pitch_low",
+    "avg_cents": -967.3,
+    "max_cents": -1086.6
+  },
+  {
+    "start": 212.225,
+    "end": 212.457,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 213.246,
+    "end": 213.612,
+    "type": "pitch_low",
+    "avg_cents": -1041.4,
+    "max_cents": -1201.5
+  },
+  {
+    "start": 213.734,
+    "end": 213.954,
+    "type": "pitch_low",
+    "avg_cents": -1243.7,
+    "max_cents": -1656.0
+  },
+  {
+    "start": 214.256,
+    "end": 214.477,
+    "type": "pitch_low",
+    "avg_cents": -1162.1,
+    "max_cents": -1228.1
+  },
+  {
+    "start": 214.512,
+    "end": 215.04,
+    "type": "pitch_low",
+    "avg_cents": -983.7,
+    "max_cents": -2123.3
+  },
+  {
+    "start": 215.086,
+    "end": 216.247,
+    "type": "pitch_low",
+    "avg_cents": -1075.5,
+    "max_cents": -1327.3
+  },
+  {
+    "start": 216.253,
+    "end": 216.892,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 217.623,
+    "end": 219.556,
+    "type": "pitch_low",
+    "avg_cents": -1386.4,
+    "max_cents": -2135.2
+  },
+  {
+    "start": 219.562,
+    "end": 220.021,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 220.799,
+    "end": 221.443,
+    "type": "pitch_low",
+    "avg_cents": -1049.9,
+    "max_cents": -1857.7
+  },
+  {
+    "start": 221.53,
+    "end": 221.791,
+    "type": "pitch_low",
+    "avg_cents": -1268.9,
+    "max_cents": -2998.3
+  },
+  {
+    "start": 222.018,
+    "end": 222.308,
+    "type": "pitch_low",
+    "avg_cents": -1177.2,
+    "max_cents": -1316.3
+  },
+  {
+    "start": 222.581,
+    "end": 223.068,
+    "type": "pitch_low",
+    "avg_cents": -1135.7,
+    "max_cents": -2966.7
+  },
+  {
+    "start": 223.074,
+    "end": 223.37,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 224.009,
+    "end": 224.334,
+    "type": "pitch_low",
+    "avg_cents": -787.6,
+    "max_cents": -994.1
+  },
+  {
+    "start": 224.357,
+    "end": 226.006,
+    "type": "pitch_low",
+    "avg_cents": -1382.3,
+    "max_cents": -2497.1
+  },
+  {
+    "start": 226.551,
+    "end": 226.876,
+    "type": "pitch_low",
+    "avg_cents": -1580.5,
+    "max_cents": -1841.3
+  },
+  {
+    "start": 227.225,
+    "end": 227.747,
+    "type": "pitch_low",
+    "avg_cents": -1292.9,
+    "max_cents": -2907.6
+  },
+  {
+    "start": 227.753,
+    "end": 228.084,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 228.09,
+    "end": 228.374,
+    "type": "pitch_low",
+    "avg_cents": -1155.7,
+    "max_cents": -1283.2
+  },
+  {
+    "start": 228.415,
+    "end": 228.629,
+    "type": "pitch_low",
+    "avg_cents": -1443.2,
+    "max_cents": -1772.1
+  },
+  {
+    "start": 228.815,
+    "end": 229.285,
+    "type": "pitch_low",
+    "avg_cents": -1457.5,
+    "max_cents": -2665.1
+  },
+  {
+    "start": 229.338,
+    "end": 229.732,
+    "type": "pitch_low",
+    "avg_cents": -639.3,
+    "max_cents": -1700.5
+  },
+  {
+    "start": 230.116,
+    "end": 231.422,
+    "type": "pitch_low",
+    "avg_cents": -1436.7,
+    "max_cents": -1922.8
+  },
+  {
+    "start": 231.491,
+    "end": 231.938,
+    "type": "pitch_low",
+    "avg_cents": -1299.3,
+    "max_cents": -1426.8
+  },
+  {
+    "start": 232.269,
+    "end": 232.623,
+    "type": "pitch_low",
+    "avg_cents": -1109.6,
+    "max_cents": -1463.2
+  },
+  {
+    "start": 232.629,
+    "end": 233.204,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 233.21,
+    "end": 233.535,
+    "type": "pitch_low",
+    "avg_cents": -912.8,
+    "max_cents": -1971.6
+  },
+  {
+    "start": 234.022,
+    "end": 234.272,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 234.376,
+    "end": 234.835,
+    "type": "pitch_low",
+    "avg_cents": -1152.8,
+    "max_cents": -1781.2
+  },
+  {
+    "start": 235.09,
+    "end": 235.514,
+    "type": "pitch_low",
+    "avg_cents": -1292.1,
+    "max_cents": -1624.4
+  },
+  {
+    "start": 235.683,
+    "end": 235.979,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 236.13,
+    "end": 236.373,
+    "type": "pitch_low",
+    "avg_cents": -1305.5,
+    "max_cents": -1544.6
+  },
+  {
+    "start": 236.646,
+    "end": 237.134,
+    "type": "pitch_low",
+    "avg_cents": -990.7,
+    "max_cents": -1135.0
+  },
+  {
+    "start": 237.517,
+    "end": 238.115,
+    "type": "pitch_low",
+    "avg_cents": -1131.9,
+    "max_cents": -1509.7
+  },
+  {
+    "start": 238.364,
+    "end": 238.771,
+    "type": "pitch_low",
+    "avg_cents": -1746.5,
+    "max_cents": -2181.3
+  },
+  {
+    "start": 239.073,
+    "end": 239.479,
+    "type": "pitch_low",
+    "avg_cents": -1660.8,
+    "max_cents": -2379.1
+  },
+  {
+    "start": 239.833,
+    "end": 240.321,
+    "type": "pitch_low",
+    "avg_cents": -1110.3,
+    "max_cents": -1313.8
+  },
+  {
+    "start": 240.327,
+    "end": 240.646,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 241.383,
+    "end": 241.604,
+    "type": "pitch_low",
+    "avg_cents": -1265.6,
+    "max_cents": -1539.2
+  },
+  {
+    "start": 241.638,
+    "end": 242.666,
+    "type": "pitch_low",
+    "avg_cents": -1429.4,
+    "max_cents": -1804.8
+  },
+  {
+    "start": 242.73,
+    "end": 243.711,
+    "type": "pitch_low",
+    "avg_cents": -1457.3,
+    "max_cents": -1755.7
+  },
+  {
+    "start": 243.717,
+    "end": 244.82,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 245.934,
+    "end": 246.399,
+    "type": "pitch_low",
+    "avg_cents": -1266.7,
+    "max_cents": -1549.5
+  },
+  {
+    "start": 246.625,
+    "end": 246.857,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 246.869,
+    "end": 247.438,
+    "type": "pitch_low",
+    "avg_cents": -1235.0,
+    "max_cents": -1887.3
+  },
+  {
+    "start": 247.67,
+    "end": 247.966,
+    "type": "pitch_low",
+    "avg_cents": -1556.1,
+    "max_cents": -1668.4
+  },
+  {
+    "start": 248.018,
+    "end": 248.378,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 248.407,
+    "end": 248.953,
+    "type": "pitch_low",
+    "avg_cents": -1323.4,
+    "max_cents": -1862.7
+  },
+  {
+    "start": 249.202,
+    "end": 249.707,
+    "type": "pitch_low",
+    "avg_cents": -1286.3,
+    "max_cents": -2889.2
+  },
+  {
+    "start": 249.765,
+    "end": 250.421,
+    "type": "pitch_low",
+    "avg_cents": -1185.0,
+    "max_cents": -2776.7
+  },
+  {
+    "start": 250.549,
+    "end": 251.257,
+    "type": "pitch_low",
+    "avg_cents": -1258.1,
+    "max_cents": -2309.8
+  },
+  {
+    "start": 251.652,
+    "end": 252.07,
+    "type": "pitch_low",
+    "avg_cents": -1725.3,
+    "max_cents": -1998.7
+  },
+  {
+    "start": 252.372,
+    "end": 253.498,
+    "type": "pitch_low",
+    "avg_cents": -1156.5,
+    "max_cents": -1688.0
+  },
+  {
+    "start": 253.736,
+    "end": 254.415,
+    "type": "pitch_low",
+    "avg_cents": -1492.2,
+    "max_cents": -1815.5
+  },
+  {
+    "start": 254.531,
+    "end": 254.845,
+    "type": "pitch_low",
+    "avg_cents": -570.7,
+    "max_cents": -911.1
+  },
+  {
+    "start": 255.211,
+    "end": 257.811,
+    "type": "pitch_low",
+    "avg_cents": -1276.2,
+    "max_cents": -1862.4
+  },
+  {
+    "start": 257.817,
+    "end": 258.299,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 259.111,
+    "end": 259.413,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 259.547,
+    "end": 259.942,
+    "type": "pitch_low",
+    "avg_cents": -1213.1,
+    "max_cents": -1376.8
+  },
+  {
+    "start": 260.209,
+    "end": 260.452,
+    "type": "pitch_low",
+    "avg_cents": -1401.3,
+    "max_cents": -1552.2
+  },
+  {
+    "start": 261.184,
+    "end": 261.468,
+    "type": "pitch_low",
+    "avg_cents": -1243.7,
+    "max_cents": -1809.1
+  },
+  {
+    "start": 261.77,
+    "end": 263.802,
+    "type": "pitch_low",
+    "avg_cents": -1342.0,
+    "max_cents": -2319.7
+  },
+  {
+    "start": 263.808,
+    "end": 264.168,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 264.173,
+    "end": 264.603,
+    "type": "pitch_low",
+    "avg_cents": -1781.8,
+    "max_cents": -2207.0
+  },
+  {
+    "start": 264.893,
+    "end": 265.375,
+    "type": "pitch_low",
+    "avg_cents": -1078.3,
+    "max_cents": -1330.4
+  },
+  {
+    "start": 265.381,
+    "end": 265.578,
+    "type": "unvoiced_miss"
+  },
+  {
+    "start": 265.741,
+    "end": 265.944,
+    "type": "pitch_low",
+    "avg_cents": -1198.6,
+    "max_cents": -1629.9
+  },
+  {
+    "start": 265.99,
+    "end": 266.223,
+    "type": "pitch_low",
+    "avg_cents": -1257.8,
+    "max_cents": -1474.0
+  },
+  {
+    "start": 266.478,
+    "end": 266.716,
+    "type": "pitch_low",
+    "avg_cents": -1180.6,
+    "max_cents": -1253.6
+  },
+  {
+    "start": 266.745,
+    "end": 267.703,
+    "type": "pitch_low",
+    "avg_cents": -547.7,
+    "max_cents": -1090.5
+  },
+  {
+    "start": 267.802,
+    "end": 270.472,
+    "type": "pitch_low",
+    "avg_cents": -1362.2,
+    "max_cents": -2074.4
+  },
+  {
+    "start": 270.478,
+    "end": 271.012,
+    "type": "unvoiced_miss"
+  }
+]

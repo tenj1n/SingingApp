@@ -1,0 +1,11 @@
+{
+  "generated_at": "2025-12-03 12:35:49",
+  "files": {
+    "pitch.json": "OK",
+    "events.json": "OK",
+    "events.min.json.gz": "OK",
+    "comments.json": "OK",
+    "summary.txt": "OK",
+    "key_offset.json": "OK"
+  }
+}

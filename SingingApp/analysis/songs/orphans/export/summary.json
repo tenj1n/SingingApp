@@ -1,0 +1,17 @@
+{
+  "tol_cents": 40.0,
+  "frames": 34552,
+  "seconds": 200.57,
+  "mean_cents": 0.0,
+  "median_cents": 0.0,
+  "std_cents": 0.0,
+  "percent_within_tol": 1.0,
+  "percent_low": 0.0,
+  "percent_high": 0.0,
+  "p10_cents": -0.0,
+  "p90_cents": 0.0,
+  "unvoiced_miss_seconds": 24.93,
+  "verdict": "mostly_ok",
+  "reason": "おおむね基準に近いピッチで歌えています。",
+  "tips": "細かいズレを減らすために、語尾の処理と次の音への入りだけを重点チェック。"
+}

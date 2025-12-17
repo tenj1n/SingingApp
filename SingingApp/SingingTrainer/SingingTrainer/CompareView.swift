@@ -19,7 +19,7 @@ struct CompareView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("比較グラフ")
+                .navigationTitle("結果")
         }
         .onAppear {
             if vm.analysis == nil && !vm.isLoading {
@@ -53,7 +53,7 @@ struct CompareView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     summarySection(a)
-                    commentSection()
+                    commentSection()      // ← ここにボタンが入る
                     settingsSection(a)
                     
                     Divider()
@@ -93,8 +93,19 @@ struct CompareView: View {
             Text("問題区間イベント数：\(eventCount) 件")
             Text("判定：\(PitchMath.verdictJP(a.summary?.verdict))")
             
-            Text("一致率（歌手=100点）：\(String(format: "%.1f", vm.score100)) 点")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("スコア \(vm.score100, specifier: "%.1f") 点")
+                    .font(.title3.bold())
+                
+                Text("通常: \(vm.score100Strict, specifier: "%.1f") 点 / オクターブ無視: \(vm.score100OctaveInvariant, specifier: "%.1f") 点")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                
+                Text("一致率: \(vm.percentWithinTol * 100, specifier: "%.1f")% / 平均ズレ: \(vm.meanAbsCents, specifier: "%.1f")c")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
             
             Text("許容範囲：±\(Int(tol)) cents（半音=100c）")
                 .font(.caption)
@@ -110,9 +121,37 @@ struct CompareView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
     
+    // MARK: - Comment  ★ここに追加する
+    
     private func commentSection() -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(vm.commentTitle).font(.headline)
+            
+            // ★AI生成ボタン + ローディング表示
+            HStack(spacing: 12) {
+                if vm.isAICommentLoading {
+                    ProgressView()
+                    Text("AIコメント生成中…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("AIでコメント生成") {
+                        vm.generateAIComment()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                
+                Spacer()
+            }
+            
+            // ★エラー表示
+            if let e = vm.aiCommentError, !e.isEmpty {
+                Text(e)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            
+            // コメント本文
             Text(vm.commentBody.isEmpty ? "（まだありません）" : vm.commentBody)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -178,7 +217,6 @@ struct CompareView: View {
     }
     
     private func pitchOverlaySection(_ a: AnalysisResponse) -> some View {
-        // vm.overlayPoints から「描画専用」配列に変換（型崩れ回避）
         let raw: [OverlayPlotPoint] = vm.overlayPoints.map {
             .init(time: $0.time, midi: $0.midi, series: $0.series.rawValue)
         }
@@ -248,15 +286,12 @@ struct CompareView: View {
     private func errorCentsSection(_ a: AnalysisResponse) -> some View {
         let tol = a.summary?.tolCents ?? 40.0
         
-        // vm.errorPoints → 描画専用配列に変換
         let raw: [ErrorPlotPoint] = vm.errorPoints.map { .init(time: $0.time, cents: $0.cents) }
             .sorted(by: { $0.time < $1.time })
         
         let (plot, xMin, xMax) = makeErrorPlotPoints(src: raw, tol: tol, onlyOut: showOnlyOutOfTol, maxPoints: maxErrorPlotPoints)
-        
         let trend: [TrendPoint] = showTrendLine ? makeTrend(points: plot, bins: 80) : []
         
-        // 極端な値で潰れないようにY幅を制限
         let maxAbs = plot.map { abs($0.cents) }.max() ?? 0
         let yMax = max(200.0, min(600.0, max(maxAbs * 1.1, tol * 2.0)))
         let yDomain = (-yMax)...(yMax)
@@ -270,7 +305,6 @@ struct CompareView: View {
                 Text("ズレデータがありません").foregroundStyle(.secondary)
             } else {
                 Chart {
-                    // 許容帯（質問の RectangleMark はここ）
                     RectangleMark(
                         xStart: .value("開始", xMin),
                         xEnd: .value("終了", xMax),
@@ -288,7 +322,6 @@ struct CompareView: View {
                     RuleMark(y: .value("許容下", -tol))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     
-                    // 点（ズレ）
                     ForEach(plot) { p in
                         PointMark(
                             x: .value("時間（秒）", p.time),
@@ -298,7 +331,6 @@ struct CompareView: View {
                         .opacity(showOnlyOutOfTol ? 0.85 : 0.35)
                     }
                     
-                    // 傾向線（平均）
                     ForEach(trend) { t in
                         LineMark(
                             x: .value("時間（秒）", t.time),

@@ -4,9 +4,15 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pathlib import Path
 import uuid, json
+import os
+
+from openai import OpenAI  # pip install openai
 
 app = Flask(__name__)
 CORS(app)
+
+# OpenAI クライアント（APIキーは環境変数 OPENAI_API_KEY から読む）
+openai_client = OpenAI()
 
 # __file__ = .../SingingTrainerApp/SingingApp/SingingApp/server.py を想定
 # parent.parent = .../SingingTrainerApp/SingingApp （プロジェクトのルート）
@@ -51,6 +57,14 @@ def read_json_or_error(path: Path, label: str):
 
 def safe_len(x):
     return len(x) if isinstance(x, list) else None
+
+
+def require_openai_key_or_error():
+    """
+    OPENAI_API_KEY が無いときに分かりやすく落とす
+    """
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError("OPENAI_API_KEY is not set (export OPENAI_API_KEY=...)")
 
 
 # --------------------------------------------------
@@ -106,7 +120,6 @@ def get_analysis(song_id: str, user_id: str):
       - summary:    analysis/<user_id>/summary.json
     """
     try:
-        # パスを組み立てる（ここが“1-2の本体”）
         ref_pitch_path = ANALYSIS_DIR / "songs" / song_id / "ref" / "pitch.json"
 
         usr_dir = ANALYSIS_DIR / user_id
@@ -114,13 +127,11 @@ def get_analysis(song_id: str, user_id: str):
         events_path = usr_dir / "events.json"
         summary_path = usr_dir / "summary.json"
 
-        # JSONを読む（無い/壊れたら例外 → 下の except へ）
         ref_pitch = read_json_or_error(ref_pitch_path, "ref_pitch")
         usr_pitch = read_json_or_error(usr_pitch_path, "usr_pitch")
         events = read_json_or_error(events_path, "events")
         summary = read_json_or_error(summary_path, "summary")
 
-        # “何を読んだか”がすぐ分かるメタ情報
         resp = {
             "ok": True,
             "session_id": f"demo-{song_id}-{user_id}",
@@ -156,6 +167,132 @@ def get_analysis(song_id: str, user_id: str):
         return json_error(404, "FILE_NOT_FOUND", str(e))
     except ValueError as e:
         return json_error(500, "INVALID_JSON", str(e))
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# --------------------------------------------------
+# ★AIコメント生成 API
+# 例: POST /api/comment/orphans/user01
+# --------------------------------------------------
+@app.post("/api/comment/<song_id>/<user_id>")
+def ai_comment(song_id: str, user_id: str):
+    try:
+        require_openai_key_or_error()
+
+        usr_dir = ANALYSIS_DIR / user_id
+        events_path = usr_dir / "events.json"
+        summary_path = usr_dir / "summary.json"
+
+        events = []
+        summary = {}
+        try:
+            events = read_json_or_error(events_path, "events")
+            summary = read_json_or_error(summary_path, "summary")
+        except Exception:
+            events = []
+            summary = {}
+
+        payload = request.get_json(silent=True) or {}
+        stats = payload.get("stats", {}) or {}
+
+        tol_cents = stats.get("tolCents", summary.get("tol_cents", 40.0))
+        percent_within = stats.get("percentWithinTol")
+        mean_abs = stats.get("meanAbsCents")
+        sample_count = stats.get("sampleCount")
+
+        score_strict = stats.get("scoreStrict")
+        score_oct = stats.get("scoreOctaveInvariant")
+        octave_now = stats.get("octaveInvariantNow")
+
+        event_head = []
+        if isinstance(events, list):
+            for e in events[:10]:
+                if isinstance(e, dict):
+                    event_head.append({
+                        "start": e.get("start"),
+                        "end": e.get("end"),
+                        "type": e.get("type"),
+                        "avg_cents": e.get("avg_cents"),
+                        "max_cents": e.get("max_cents"),
+                    })
+
+        model_input = {
+            "song_id": song_id,
+            "user_id": user_id,
+            "tolCents": tol_cents,
+            "percentWithinTol": percent_within,
+            "meanAbsCents": mean_abs,
+            "sampleCount": sample_count,
+            "scoreStrict": score_strict,
+            "scoreOctaveInvariant": score_oct,
+            "octaveInvariantNow": octave_now,
+            "summary": {
+                "verdict": summary.get("verdict"),
+                "reason": summary.get("reason"),
+                "tips": summary.get("tips"),
+            },
+            "events_head": event_head,
+        }
+
+        # ★ここが「プロンプトを書く場所」：短め初心者向けに差し替え済み
+        system = """
+あなたはカラオケ初心者向けの歌のコーチです。専門用語は使いません。
+
+出力は必ずJSONのみ：
+{"title": string, "body": string}
+
+ルール：
+- 日本語・短文・絵文字なし
+- bodyは4〜6行まで
+- cents/Hz/MIDI/オクターブ等の用語は禁止（「高い/低い」「1段上/下」に言い換え）
+- 数字は基本1つまで（秒も出さない）
+- 必ず「今日やる練習」を2つ書く（すぐできる内容）
+- 最後に一言だけ励ます
+
+構成：
+1行目：今の傾向（例：全体的に低め）
+2行目：原因の可能性（例：高さが1段ずれているかも）
+3〜4行目：練習①②（具体的に）
+5行目：目標（例：最初の1音を合わせる）
+6行目：励まし
+""".strip()
+
+        user = "次のJSONを読んでコメントを作成してください。\n" + json.dumps(model_input, ensure_ascii=False)
+
+        resp = openai_client.responses.create(
+            model="gpt-5.2",
+            input=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+
+        text = (getattr(resp, "output_text", "") or "").strip()
+
+        title = "AIコメント"
+        body = text if text else "コメント生成に失敗しました（空の応答）"
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                title = str(obj.get("title") or title)
+                body = str(obj.get("body") or body)
+        except Exception:
+            pass
+
+        return jsonify({
+            "ok": True,
+            "title": title,
+            "body": body,
+            "meta": {"song_id": song_id, "user_id": user_id}
+        })
+
+    except FileNotFoundError as e:
+        return json_error(404, "FILE_NOT_FOUND", str(e))
+    except ValueError as e:
+        return json_error(500, "INVALID_JSON", str(e))
+    except RuntimeError as e:
+        return json_error(500, "OPENAI_KEY_MISSING", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 

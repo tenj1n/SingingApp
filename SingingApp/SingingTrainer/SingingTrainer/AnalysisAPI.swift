@@ -21,3 +21,26 @@ final class AnalysisAPI {
         return try decoder.decode(AnalysisResponse.self, from: data)
     }
 }
+extension AnalysisAPI {
+    
+    func fetchAIComment(sessionId: String, req: AICommentRequest) async throws -> AICommentResponse {
+        // server.py: POST /api/comment/<song_id>/<user_id>
+        let url = URL(string: "\(baseURL.absoluteString)/api/comment/\(sessionId)")!
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let encoder = JSONEncoder()
+        request.httpBody = try encoder.encode(req)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+        }
+        
+        let decoder = JSONDecoder()
+        return try decoder.decode(AICommentResponse.self, from: data)
+    }
+}

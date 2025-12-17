@@ -21,7 +21,7 @@ struct OverlayPoint: Identifiable {
 struct ErrorPoint: Identifiable {
     let id = UUID()
     let time: Double
-    let cents: Double   // 0基準。+は高い / -は低い
+    let cents: Double   // 0基準。+は高い / -は低い（オクターブ無視時は ±600 以内に寄る）
 }
 
 struct PitchStats {
@@ -46,17 +46,18 @@ enum PitchMath {
         return "\(names[note])\(octave)"
     }
     
-    static func centsDiff(usrHz: Double, refHz: Double) -> Double {
-        1200.0 * log2(usrHz / refHz)
-    }
-    
     /// ref に対して usr を「最も近いオクターブ」に寄せる（±12の倍数）
     static func alignMidiToNearestOctave(usrMidi: Double, refMidi: Double) -> Double {
         let k = round((refMidi - usrMidi) / 12.0)
         return usrMidi + 12.0 * k
     }
     
-    /// データ作成（軽量化の要：ここで間引き＋ビニング）
+    /// midi差 → cents差（midiは半音単位なので ×100）
+    static func centsDiff(usrMidi: Double, refMidi: Double) -> Double {
+        (usrMidi - refMidi) * 100.0
+    }
+    
+    /// データ作成（間引き＋ビニング）
     static func makeDisplayData(
         usr: PitchTrack?,
         ref: PitchTrack?,
@@ -72,14 +73,15 @@ enum PitchMath {
             return ([], [], PitchStats(tolCents: tolCents, percentWithinTol: 0, meanAbsCents: 0, sampleCount: 0))
         }
         
-        let step = density.rawValue
+        let step = max(1, density.rawValue)
         
-        // --- ペア比較（同じindexを同時刻扱い） ---
-        // 点が多すぎると重いので、まず step で間引いてから cents を作る
+        // まず間引いた rawPairs を作る
+        // ※同じ index を同時刻扱い（今の仕様を維持）
         var rawPairs: [(t: Double, usrMidi: Double, refMidi: Double, cents: Double)] = []
         rawPairs.reserveCapacity(n / step)
         
         for i in stride(from: 0, to: n, by: step) {
+            // ここはあなたの PitchPoint の型に合わせている（t は Double、f0Hz は Double?）
             let ut = usrTrack[i].t
             let rt = refTrack[i].t
             let t = min(ut, rt)
@@ -87,61 +89,80 @@ enum PitchMath {
             guard let uHz = usrTrack[i].f0Hz, uHz > 0,
                   let rHz = refTrack[i].f0Hz, rHz > 0 else { continue }
             
-            let uMidi = hzToMidi(uHz)
+            var uMidi = hzToMidi(uHz)
             let rMidi = hzToMidi(rHz)
             
-            let uAlignedMidi = octaveInvariant ? alignMidiToNearestOctave(usrMidi: uMidi, refMidi: rMidi) : uMidi
-            let uAlignedHz = 440.0 * pow(2.0, (uAlignedMidi - 69.0) / 12.0)
-            let c = centsDiff(usrHz: uAlignedHz, refHz: rHz)
-            
-            rawPairs.append((t: t, usrMidi: uAlignedMidi, refMidi: rMidi, cents: c))
-        }
-        
-        // --- さらに軽くする：時間ビンで平均化（ギザギザを減らして見やすくする） ---
-        // density が粗いほど binSec も少し大きくして “点数” を減らす
-        let binSec = max(0.10, 0.02 * Double(step))  // 例: x10なら0.2秒程度
-        var bins: [Int: (sumUsr: Double, sumRef: Double, sumC: Double, count: Int, time: Double)] = [:]
-        bins.reserveCapacity(rawPairs.count / 3)
-        
-        for p in rawPairs {
-            let k = Int(floor(p.t / binSec))
-            if var b = bins[k] {
-                b.sumUsr += p.usrMidi
-                b.sumRef += p.refMidi
-                b.sumC += p.cents
-                b.count += 1
-                bins[k] = b
-            } else {
-                bins[k] = (sumUsr: p.usrMidi, sumRef: p.refMidi, sumC: p.cents, count: 1, time: Double(k) * binSec)
+            if octaveInvariant {
+                uMidi = alignMidiToNearestOctave(usrMidi: uMidi, refMidi: rMidi)
             }
+            
+            let c = centsDiff(usrMidi: uMidi, refMidi: rMidi)
+            rawPairs.append((t: t, usrMidi: uMidi, refMidi: rMidi, cents: c))
         }
         
-        let sortedKeys = bins.keys.sorted()
+        if rawPairs.isEmpty {
+            return ([], [], PitchStats(tolCents: tolCents, percentWithinTol: 0, meanAbsCents: 0, sampleCount: 0))
+        }
+        
+        // 時間順を保証（安全のため）
+        rawPairs.sort { $0.t < $1.t }
+        
+        // --- ビニング（辞書をやめて順次集計：軽い＆順序安定） ---
+        let binSec = max(0.10, 0.02 * Double(step))  // 例: x10なら0.2秒程度
+        
         var overlay: [OverlayPoint] = []
         var errors: [ErrorPoint] = []
-        overlay.reserveCapacity(sortedKeys.count * 2)
-        errors.reserveCapacity(sortedKeys.count)
+        overlay.reserveCapacity(rawPairs.count * 2)
+        errors.reserveCapacity(rawPairs.count)
         
         var within = 0
         var sumAbs = 0.0
         var sample = 0
         
-        for k in sortedKeys {
-            guard let b = bins[k] else { continue }
-            let t = b.time
-            let u = b.sumUsr / Double(b.count)
-            let r = b.sumRef / Double(b.count)
-            let c = b.sumC / Double(b.count)
+        // 現在のビン
+        var curBinIndex: Int? = nil
+        var curTime: Double = 0
+        var sumUsr = 0.0
+        var sumRef = 0.0
+        var sumC = 0.0
+        var count = 0
+        
+        func flushBin() {
+            guard count > 0 else { return }
+            let u = sumUsr / Double(count)
+            let r = sumRef / Double(count)
+            let c = sumC / Double(count)
             
-            overlay.append(.init(series: .user, time: t, midi: u))
-            overlay.append(.init(series: .ref,  time: t, midi: r))
-            errors.append(.init(time: t, cents: c))
+            overlay.append(.init(series: .user, time: curTime, midi: u))
+            overlay.append(.init(series: .ref,  time: curTime, midi: r))
+            errors.append(.init(time: curTime, cents: c))
             
             sample += 1
             let absC = abs(c)
             sumAbs += absC
             if absC <= tolCents { within += 1 }
+            
+            // reset
+            sumUsr = 0; sumRef = 0; sumC = 0; count = 0
         }
+        
+        for p in rawPairs {
+            let k = Int(floor(p.t / binSec))
+            if curBinIndex == nil {
+                curBinIndex = k
+                curTime = Double(k) * binSec
+            } else if k != curBinIndex {
+                flushBin()
+                curBinIndex = k
+                curTime = Double(k) * binSec
+            }
+            
+            sumUsr += p.usrMidi
+            sumRef += p.refMidi
+            sumC += p.cents
+            count += 1
+        }
+        flushBin()
         
         let percent = sample > 0 ? Double(within) / Double(sample) : 0.0
         let meanAbs = sample > 0 ? (sumAbs / Double(sample)) : 0.0

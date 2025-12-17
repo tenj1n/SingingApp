@@ -101,3 +101,23 @@ struct AnalysisResponse: Codable {
         case refPitch = "ref_pitch"
     }
 }
+struct AICommentResponse: Decodable {
+    let ok: Bool
+    let title: String?
+    let body: String?
+    let message: String?   // エラー時に入る可能性がある
+}
+
+struct AICommentRequest: Encodable {
+    let stats: AICommentStats
+}
+
+struct AICommentStats: Encodable {
+    let tolCents: Double
+    let percentWithinTol: Double
+    let meanAbsCents: Double
+    let sampleCount: Int
+    let scoreStrict: Double
+    let scoreOctaveInvariant: Double
+    let octaveInvariantNow: Bool
+}

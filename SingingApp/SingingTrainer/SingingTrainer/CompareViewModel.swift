@@ -16,12 +16,21 @@ final class CompareViewModel: ObservableObject {
     @Published private(set) var overlayPoints: [OverlayPoint] = []
     @Published private(set) var errorPoints: [ErrorPoint] = []
     
-    // スコア・コメント
+    // スコア・コメント（現在選択中の表示モードのスコア）
     @Published private(set) var score100: Double = 0
     @Published private(set) var percentWithinTol: Double = 0
     @Published private(set) var meanAbsCents: Double = 0
+    
+    // 両方のスコア（通常 / オクターブ無視）
+    @Published private(set) var score100Strict: Double = 0              // octaveInvariant=false
+    @Published private(set) var score100OctaveInvariant: Double = 0      // octaveInvariant=true
+    
     @Published private(set) var commentTitle: String = "コメント"
     @Published private(set) var commentBody: String = ""
+    
+    // AI生成ボタン
+    @Published var isAICommentLoading = false
+    @Published var aiCommentError: String?
     
     private var lastSessionId: String?
     
@@ -54,40 +63,123 @@ final class CompareViewModel: ObservableObject {
         
         let tol = a.summary?.tolCents ?? 40.0
         let density = self.density
-        let octaveInvariant = self.octaveInvariant
+        let showOctaveInvariant = self.octaveInvariant
         
-        // 重い計算はバックグラウンドへ
+        // detached に渡す値は先に退避
+        let usrPitch = a.usrPitch
+        let refPitch = a.refPitch
+        let summary = a.summary
+        
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             
-            let result = PitchMath.makeDisplayData(
-                usr: a.usrPitch,
-                ref: a.refPitch,
+            let strictResult = PitchMath.makeDisplayData(
+                usr: usrPitch,
+                ref: refPitch,
                 density: density,
-                octaveInvariant: octaveInvariant,
+                octaveInvariant: false,
                 tolCents: tol
             )
             
-            let score = result.stats.percentWithinTol * 100.0
-            let comment = PitchMath.makeCommentJP(stats: result.stats, summary: a.summary)
+            let octaveResult = PitchMath.makeDisplayData(
+                usr: usrPitch,
+                ref: refPitch,
+                density: density,
+                octaveInvariant: true,
+                tolCents: tol
+            )
+            
+            let active = showOctaveInvariant ? octaveResult : strictResult
+            
+            let strictScore100 = strictResult.stats.percentWithinTol * 100.0
+            let octaveScore100 = octaveResult.stats.percentWithinTol * 100.0
+            let activeScore100 = active.stats.percentWithinTol * 100.0
+            
+            let baseComment = PitchMath.makeCommentJP(stats: active.stats, summary: summary)
             
             await MainActor.run {
-                self.overlayPoints = result.overlay
-                self.errorPoints = result.errors
+                self.overlayPoints = active.overlay
+                self.errorPoints = active.errors
                 
-                self.score100 = score
-                self.percentWithinTol = result.stats.percentWithinTol
-                self.meanAbsCents = result.stats.meanAbsCents
+                self.score100 = activeScore100
+                self.percentWithinTol = active.stats.percentWithinTol
+                self.meanAbsCents = active.stats.meanAbsCents
                 
-                self.commentTitle = comment.title
-                self.commentBody = comment.body
+                self.score100Strict = strictScore100
+                self.score100OctaveInvariant = octaveScore100
+                
+                self.commentTitle = baseComment.title
+                self.commentBody = baseComment.body
             }
         }
     }
     
-    // ズレグラフの表示レンジ（極端な値で潰れないように）
+    // AIコメント生成（サーバへPOSTしてコメントを受け取る）
+    func generateAIComment() {
+        guard let a = analysis else { return }
+        guard let sessionId = lastSessionId else { return }
+        guard !isAICommentLoading else { return }
+        
+        isAICommentLoading = true
+        aiCommentError = nil
+        
+        // ★ detached に入る前に、MainActor上で必要な値を全部コピーしておく（ここが重要）
+        let tol = a.summary?.tolCents ?? 40.0
+        let density = self.density
+        let octaveNow = self.octaveInvariant
+        
+        let usrPitch = a.usrPitch
+        let refPitch = a.refPitch
+        
+        let strictScore = self.score100Strict
+        let octaveScore = self.score100OctaveInvariant
+        
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            
+            let activeResult = PitchMath.makeDisplayData(
+                usr: usrPitch,
+                ref: refPitch,
+                density: density,
+                octaveInvariant: octaveNow,
+                tolCents: tol
+            )
+            
+            let req = AICommentRequest(
+                stats: AICommentStats(
+                    tolCents: activeResult.stats.tolCents,
+                    percentWithinTol: activeResult.stats.percentWithinTol,
+                    meanAbsCents: activeResult.stats.meanAbsCents,
+                    sampleCount: activeResult.stats.sampleCount,
+                    scoreStrict: strictScore,
+                    scoreOctaveInvariant: octaveScore,
+                    octaveInvariantNow: octaveNow
+                )
+            )
+            
+            do {
+                let res = try await AnalysisAPI.shared.fetchAIComment(sessionId: sessionId, req: req)
+                
+                await MainActor.run {
+                    if res.ok {
+                        self.commentTitle = res.title ?? "AIコメント"
+                        self.commentBody = res.body ?? "（本文が空でした）"
+                        self.aiCommentError = nil
+                    } else {
+                        self.aiCommentError = res.message ?? "AIコメント生成に失敗しました"
+                    }
+                    self.isAICommentLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.aiCommentError = error.localizedDescription
+                    self.isAICommentLoading = false
+                }
+            }
+        }
+    }
+    
     func errorYDomain(tol: Double) -> ClosedRange<Double> {
-        // だいたい±(tol*6) くらいを上限にして見やすく
         let m = max(200.0, tol * 6.0)
         return (-m)...(m)
     }

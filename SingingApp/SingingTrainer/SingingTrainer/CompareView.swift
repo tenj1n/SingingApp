@@ -11,6 +11,7 @@ struct CompareView: View {
     @State private var showTrendLine: Bool = true
     @State private var maxErrorPlotPoints: Int = 1200
     @State private var maxOverlayPlotPoints: Int = 2500
+    @State private var showHistory = false
     
     init(sessionId: String = "orphans/user01") {
         self.sessionId = sessionId
@@ -139,6 +140,18 @@ struct CompareView: View {
                         vm.generateAIComment()
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(vm.isAICommentLoading)
+                    Button(vm.isHistorySaved ? "保存済み" : (vm.isHistorySaving ? "保存中…" : "履歴に保存")) {
+                        vm.saveAICommentToHistory()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(vm.commentBody.isEmpty || vm.isHistorySaving || vm.isHistorySaved || vm.isAICommentLoading)
+                    
+                    if let e = vm.historySaveError, !e.isEmpty {
+                        Text(e)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
                 
                 Spacer()

@@ -12,26 +12,32 @@ final class CompareViewModel: ObservableObject {
     @Published var density: Density = .x10
     @Published var octaveInvariant = true
     
-    // 表示キャッシュ（軽量化済みの点群）
+    // 表示キャッシュ
     @Published private(set) var overlayPoints: [OverlayPoint] = []
     @Published private(set) var errorPoints: [ErrorPoint] = []
     
-    // スコア・コメント（現在選択中の表示モードのスコア）
+    // スコア
     @Published private(set) var score100: Double = 0
     @Published private(set) var percentWithinTol: Double = 0
     @Published private(set) var meanAbsCents: Double = 0
+    @Published private(set) var score100Strict: Double = 0
+    @Published private(set) var score100OctaveInvariant: Double = 0
     
-    // 両方のスコア（通常 / オクターブ無視）
-    @Published private(set) var score100Strict: Double = 0              // octaveInvariant=false
-    @Published private(set) var score100OctaveInvariant: Double = 0      // octaveInvariant=true
-    
+    // コメント（表示）
     @Published private(set) var commentTitle: String = "コメント"
     @Published private(set) var commentBody: String = ""
     
-    // AI生成ボタン
+    // AI
     @Published var isAICommentLoading = false
     @Published var aiCommentError: String?
     
+    // ★履歴保存（手動）
+    @Published var isHistorySaving = false
+    @Published var historySaveError: String?
+    @Published private(set) var didGenerateAIComment = false
+    @Published private(set) var isHistorySaved = false
+    @Published private(set) var sampleCount: Int = 0
+
     private var lastSessionId: String?
     
     func load(sessionId: String) {
@@ -39,6 +45,11 @@ final class CompareViewModel: ObservableObject {
         lastSessionId = sessionId
         isLoading = true
         errorMessage = nil
+        
+        // ロードし直したら保存状態をリセット
+        didGenerateAIComment = false
+        isHistorySaved = false
+        historySaveError = nil
         
         Task {
             do {
@@ -65,7 +76,6 @@ final class CompareViewModel: ObservableObject {
         let density = self.density
         let showOctaveInvariant = self.octaveInvariant
         
-        // detached に渡す値は先に退避
         let usrPitch = a.usrPitch
         let refPitch = a.refPitch
         let summary = a.summary
@@ -74,16 +84,14 @@ final class CompareViewModel: ObservableObject {
             guard let self else { return }
             
             let strictResult = PitchMath.makeDisplayData(
-                usr: usrPitch,
-                ref: refPitch,
+                usr: usrPitch, ref: refPitch,
                 density: density,
                 octaveInvariant: false,
                 tolCents: tol
             )
             
             let octaveResult = PitchMath.makeDisplayData(
-                usr: usrPitch,
-                ref: refPitch,
+                usr: usrPitch, ref: refPitch,
                 density: density,
                 octaveInvariant: true,
                 tolCents: tol
@@ -104,17 +112,18 @@ final class CompareViewModel: ObservableObject {
                 self.score100 = activeScore100
                 self.percentWithinTol = active.stats.percentWithinTol
                 self.meanAbsCents = active.stats.meanAbsCents
-                
+                self.sampleCount = active.stats.sampleCount
+
                 self.score100Strict = strictScore100
                 self.score100OctaveInvariant = octaveScore100
                 
+                // ルールベースのコメント（これはAIではない）
                 self.commentTitle = baseComment.title
                 self.commentBody = baseComment.body
             }
         }
     }
     
-    // AIコメント生成（サーバへPOSTしてコメントを受け取る）
     func generateAIComment() {
         guard let a = analysis else { return }
         guard let sessionId = lastSessionId else { return }
@@ -123,7 +132,11 @@ final class CompareViewModel: ObservableObject {
         isAICommentLoading = true
         aiCommentError = nil
         
-        // ★ detached に入る前に、MainActor上で必要な値を全部コピーしておく（ここが重要）
+        // AI生成し直したら「未保存」に戻す
+        didGenerateAIComment = false
+        isHistorySaved = false
+        historySaveError = nil
+        
         let tol = a.summary?.tolCents ?? 40.0
         let density = self.density
         let octaveNow = self.octaveInvariant
@@ -165,6 +178,10 @@ final class CompareViewModel: ObservableObject {
                         self.commentTitle = res.title ?? "AIコメント"
                         self.commentBody = res.body ?? "（本文が空でした）"
                         self.aiCommentError = nil
+                        
+                        self.didGenerateAIComment = true
+                        self.isHistorySaved = false
+                        self.historySaveError = nil
                     } else {
                         self.aiCommentError = res.message ?? "AIコメント生成に失敗しました"
                     }
@@ -179,8 +196,60 @@ final class CompareViewModel: ObservableObject {
         }
     }
     
+    // ★追加：ボタン押下時だけ履歴保存
+    func saveAICommentToHistory() {
+        guard let sessionId = lastSessionId else { return }
+        guard !commentBody.isEmpty else { return }
+        guard !isHistorySaving else { return }
+        
+        // （あなたの方針が「AI生成後のみ保存」なら、これを残してOK）
+        // guard didGenerateAIComment else { return }
+        
+        isHistorySaving = true
+        historySaveError = nil
+        
+        let req = HistorySaveRequest(
+            commentTitle: commentTitle.isEmpty ? "AIコメント" : commentTitle,
+            commentBody: commentBody,
+            
+            score100: score100,
+            score100Strict: score100Strict,
+            score100OctaveInvariant: score100OctaveInvariant,
+            octaveInvariantNow: octaveInvariant,
+            
+            tolCents: (analysis?.summary?.tolCents ?? 40.0),
+            percentWithinTol: percentWithinTol,
+            meanAbsCents: meanAbsCents,
+            sampleCount: sampleCount
+        )
+        
+        Task {
+            do {
+                let res = try await AnalysisAPI.shared.appendHistory(sessionId: sessionId, reqBody: req)
+                if res.ok {
+                    isHistorySaved = true
+                    historySaveError = nil
+                } else {
+                    historySaveError = res.message ?? "履歴の保存に失敗しました"
+                }
+                isHistorySaving = false
+            } catch {
+                historySaveError = error.localizedDescription
+                isHistorySaving = false
+            }
+        }
+    }
+
+    
+    // ズレグラフの表示レンジ
     func errorYDomain(tol: Double) -> ClosedRange<Double> {
         let m = max(200.0, tol * 6.0)
         return (-m)...(m)
+    }
+    
+    private static func splitSongUser(from sessionId: String) -> (String, String) {
+        let parts = sessionId.split(separator: "/").map(String.init)
+        if parts.count >= 2 { return (parts[0], parts[1]) }
+        return ("orphans", "user01")
     }
 }

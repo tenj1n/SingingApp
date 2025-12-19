@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - API Models
+// MARK: - Pitch
 
 struct PitchPoint: Codable {
     let t: Double
@@ -21,6 +21,7 @@ struct PitchTrack: Codable {
 
 struct PitchEvent: Codable, Identifiable {
     let id = UUID()
+    
     let start: Double?
     let end: Double?
     let type: String?
@@ -33,6 +34,8 @@ struct PitchEvent: Codable, Identifiable {
         case maxCents = "max_cents"
     }
 }
+
+// MARK: - Summary / Meta
 
 struct AnalysisSummary: Codable {
     let tolCents: Double?
@@ -101,11 +104,14 @@ struct AnalysisResponse: Codable {
         case refPitch = "ref_pitch"
     }
 }
+
+// MARK: - AI Comment
+
 struct AICommentResponse: Decodable {
     let ok: Bool
     let title: String?
     let body: String?
-    let message: String?   // エラー時に入る可能性がある
+    let message: String?
 }
 
 struct AICommentRequest: Encodable {

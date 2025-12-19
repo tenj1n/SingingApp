@@ -21,7 +21,7 @@ struct OverlayPoint: Identifiable {
 struct ErrorPoint: Identifiable {
     let id = UUID()
     let time: Double
-    let cents: Double   // 0基準。+は高い / -は低い（オクターブ無視時は ±600 以内に寄る）
+    let cents: Double
 }
 
 struct PitchStats {
@@ -33,7 +33,6 @@ struct PitchStats {
 
 enum PitchMath {
     
-    // Hz -> MIDI (A4=69)
     static func hzToMidi(_ hz: Double) -> Double {
         69.0 + 12.0 * log2(hz / 440.0)
     }
@@ -46,18 +45,15 @@ enum PitchMath {
         return "\(names[note])\(octave)"
     }
     
-    /// ref に対して usr を「最も近いオクターブ」に寄せる（±12の倍数）
     static func alignMidiToNearestOctave(usrMidi: Double, refMidi: Double) -> Double {
         let k = round((refMidi - usrMidi) / 12.0)
         return usrMidi + 12.0 * k
     }
     
-    /// midi差 → cents差（midiは半音単位なので ×100）
     static func centsDiff(usrMidi: Double, refMidi: Double) -> Double {
         (usrMidi - refMidi) * 100.0
     }
     
-    /// データ作成（間引き＋ビニング）
     static func makeDisplayData(
         usr: PitchTrack?,
         ref: PitchTrack?,
@@ -69,19 +65,17 @@ enum PitchMath {
         let usrTrack = usr?.track ?? []
         let refTrack = ref?.track ?? []
         let n = min(usrTrack.count, refTrack.count)
+        
         if n == 0 {
             return ([], [], PitchStats(tolCents: tolCents, percentWithinTol: 0, meanAbsCents: 0, sampleCount: 0))
         }
         
         let step = max(1, density.rawValue)
         
-        // まず間引いた rawPairs を作る
-        // ※同じ index を同時刻扱い（今の仕様を維持）
         var rawPairs: [(t: Double, usrMidi: Double, refMidi: Double, cents: Double)] = []
         rawPairs.reserveCapacity(n / step)
         
         for i in stride(from: 0, to: n, by: step) {
-            // ここはあなたの PitchPoint の型に合わせている（t は Double、f0Hz は Double?）
             let ut = usrTrack[i].t
             let rt = refTrack[i].t
             let t = min(ut, rt)
@@ -104,11 +98,10 @@ enum PitchMath {
             return ([], [], PitchStats(tolCents: tolCents, percentWithinTol: 0, meanAbsCents: 0, sampleCount: 0))
         }
         
-        // 時間順を保証（安全のため）
         rawPairs.sort { $0.t < $1.t }
         
-        // --- ビニング（辞書をやめて順次集計：軽い＆順序安定） ---
-        let binSec = max(0.10, 0.02 * Double(step))  // 例: x10なら0.2秒程度
+        // ビン幅（秒）
+        let binSec = max(0.10, 0.02 * Double(step))
         
         var overlay: [OverlayPoint] = []
         var errors: [ErrorPoint] = []
@@ -119,7 +112,6 @@ enum PitchMath {
         var sumAbs = 0.0
         var sample = 0
         
-        // 現在のビン
         var curBinIndex: Int? = nil
         var curTime: Double = 0
         var sumUsr = 0.0
@@ -142,7 +134,6 @@ enum PitchMath {
             sumAbs += absC
             if absC <= tolCents { within += 1 }
             
-            // reset
             sumUsr = 0; sumRef = 0; sumC = 0; count = 0
         }
         
@@ -191,7 +182,7 @@ enum PitchMath {
         let tol = stats.tolCents
         let verdict = verdictJP(summary?.verdict)
         
-        var title = "コメント"
+        let title = "コメント"
         var lines: [String] = []
         
         lines.append("判定：\(verdict)")
@@ -212,7 +203,7 @@ enum PitchMath {
             } else if score >= 50 {
                 lines.append("改善ヒント：低い/高い側に外れやすい区間を探して、そこだけ繰り返し練習すると効率が良いです。")
             } else {
-                lines.append("改善ヒント：まずはサビ前後など短い区間に絞って、基準音に合わせる練習から始めましょう。")
+                lines.append("改善ヒント：まずは短い区間に絞って、基準音に合わせる練習から始めましょう。")
             }
         }
         

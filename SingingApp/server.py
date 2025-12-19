@@ -5,35 +5,27 @@ from flask_cors import CORS
 from pathlib import Path
 import uuid, json
 import os
+from datetime import datetime
 
 from openai import OpenAI  # pip install openai
 
 app = Flask(__name__)
 CORS(app)
 
-# OpenAI クライアント（APIキーは環境変数 OPENAI_API_KEY から読む）
 openai_client = OpenAI()
 
-# __file__ = .../SingingTrainerApp/SingingApp/SingingApp/server.py を想定
-# parent.parent = .../SingingTrainerApp/SingingApp （プロジェクトのルート）
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Xcode プロジェクト側のフォルダ（SingingApp 配下に analysis などがある想定）
 PROJECT_DIR = BASE_DIR / "SingingApp"
-
-# 解析系ファイルを置いているディレクトリ
 ANALYSIS_DIR = PROJECT_DIR / "analysis"
 
-# 録音アップロード先 (例: SingingApp/analysis/user01/uploads)
 UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # --------------------------------------------------
-# 共通ヘルパー（「原因が追える」ように強化版）
+# 共通ヘルパー
 # --------------------------------------------------
 def json_error(status: int, code: str, message: str, **extra):
-    """エラーを必ず同じ形で返す"""
     payload = {"ok": False, "code": code, "message": message}
     if extra:
         payload["extra"] = extra
@@ -41,11 +33,6 @@ def json_error(status: int, code: str, message: str, **extra):
 
 
 def read_json_or_error(path: Path, label: str):
-    """
-    JSON を読む。
-    - 無い → FileNotFoundError
-    - 壊れてる → ValueError
-    """
     if not path.exists():
         raise FileNotFoundError(f"{label} not found: {path}")
     try:
@@ -60,11 +47,54 @@ def safe_len(x):
 
 
 def require_openai_key_or_error():
-    """
-    OPENAI_API_KEY が無いときに分かりやすく落とす
-    """
     if not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set (export OPENAI_API_KEY=...)")
+
+
+def _normalize_ai_comment(text: str):
+    # ```json ... ``` を剥がす
+    t = (text or "").strip()
+    t = t.replace("```json", "").replace("```", "").strip()
+
+    # JSONなら parse
+    try:
+        obj = json.loads(t)
+        if isinstance(obj, dict):
+            title = str(obj.get("title") or "AIコメント")
+            body = str(obj.get("body") or "")
+            return title, body
+    except Exception:
+        pass
+
+    # ダメならそのまま本文
+    return "AIコメント", t
+
+
+# --------------------------------------------------
+# 履歴（JSONファイル）ユーティリティ
+# --------------------------------------------------
+def _history_path(user_id: str) -> Path:
+    usr_dir = ANALYSIS_DIR / user_id
+    usr_dir.mkdir(parents=True, exist_ok=True)
+    return usr_dir / "history.json"
+
+
+def _load_history(user_id: str):
+    p = _history_path(user_id)
+    if not p.exists():
+        return []
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _save_history(user_id: str, items):
+    p = _history_path(user_id)
+    with p.open("w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
 
 
 # --------------------------------------------------
@@ -80,10 +110,6 @@ def health():
 # --------------------------------------------------
 @app.post("/upload")
 def upload():
-    """
-    マルチパートで audio ファイルを受け取って保存する。
-    フィールド名: 'audio' （iOS 側からこれで送る）
-    """
     if "audio" not in request.files:
         return jsonify({"ok": False, "error": "no 'audio' field"}), 400
 
@@ -107,18 +133,11 @@ def upload():
 
 
 # --------------------------------------------------
-# 解析結果をまとめて返す API（デバッグ強化版）
+# 解析結果をまとめて返す API
 # 例: /api/analysis/orphans/user01
 # --------------------------------------------------
 @app.get("/api/analysis/<song_id>/<user_id>")
 def get_analysis(song_id: str, user_id: str):
-    """
-    1回のリクエストでまとめて返す:
-      - ref_pitch:  analysis/songs/<song_id>/ref/pitch.json
-      - usr_pitch:  analysis/<user_id>/pitch.json
-      - events:     analysis/<user_id>/events.json
-      - summary:    analysis/<user_id>/summary.json
-    """
     try:
         ref_pitch_path = ANALYSIS_DIR / "songs" / song_id / "ref" / "pitch.json"
 
@@ -172,7 +191,7 @@ def get_analysis(song_id: str, user_id: str):
 
 
 # --------------------------------------------------
-# ★AIコメント生成 API
+# AIコメント生成 API
 # 例: POST /api/comment/orphans/user01
 # --------------------------------------------------
 @app.post("/api/comment/<song_id>/<user_id>")
@@ -235,7 +254,6 @@ def ai_comment(song_id: str, user_id: str):
             "events_head": event_head,
         }
 
-        # ★ここが「プロンプトを書く場所」：短め初心者向けに差し替え済み
         system = """
 あなたはカラオケ初心者向けの歌のコーチです。専門用語は使いません。
 
@@ -251,10 +269,10 @@ def ai_comment(song_id: str, user_id: str):
 - 最後に一言だけ励ます
 
 構成：
-1行目：今の傾向（例：全体的に低め）
-2行目：原因の可能性（例：高さが1段ずれているかも）
+1行目：今の傾向
+2行目：原因の可能性
 3〜4行目：練習①②（具体的に）
-5行目：目標（例：最初の1音を合わせる）
+5行目：目標
 6行目：励まし
 """.strip()
 
@@ -268,29 +286,11 @@ def ai_comment(song_id: str, user_id: str):
             ],
         )
 
-        text = (getattr(resp, "output_text", "") or "").strip()
+        llm_text = (getattr(resp, "output_text", "") or "").strip()
+        title, body = _normalize_ai_comment(llm_text)
 
-        title = "AIコメント"
-        body = text if text else "コメント生成に失敗しました（空の応答）"
-        try:
-            obj = json.loads(text)
-            if isinstance(obj, dict):
-                title = str(obj.get("title") or title)
-                body = str(obj.get("body") or body)
-        except Exception:
-            pass
+        return jsonify({"ok": True, "title": title, "body": body})
 
-        return jsonify({
-            "ok": True,
-            "title": title,
-            "body": body,
-            "meta": {"song_id": song_id, "user_id": user_id}
-        })
-
-    except FileNotFoundError as e:
-        return json_error(404, "FILE_NOT_FOUND", str(e))
-    except ValueError as e:
-        return json_error(500, "INVALID_JSON", str(e))
     except RuntimeError as e:
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
     except Exception as e:
@@ -298,7 +298,90 @@ def ai_comment(song_id: str, user_id: str):
 
 
 # --------------------------------------------------
-# ローカル実行
+# ★履歴：追加（保存） API
+# 例: POST /api/history/orphans/user01/append
 # --------------------------------------------------
+@app.post("/api/history/<song_id>/<user_id>/append")
+def history_append(song_id: str, user_id: str):
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        # iOSからは camelCase で来てもOKにする
+        comment_title = payload.get("commentTitle") or payload.get("comment_title") or "AIコメント"
+        comment_body  = payload.get("commentBody")  or payload.get("comment_body")  or ""
+
+        score100 = payload.get("score100")
+        score100_strict = payload.get("score100Strict") or payload.get("score100_strict")
+        score100_oct = payload.get("score100OctaveInvariant") or payload.get("score100_octave_invariant")
+        octave_now = payload.get("octaveInvariantNow") or payload.get("octave_invariant_now")
+
+        tol_cents = payload.get("tolCents") or payload.get("tol_cents")
+        percent_within = payload.get("percentWithinTol") or payload.get("percent_within_tol")
+        mean_abs = payload.get("meanAbsCents") or payload.get("mean_abs_cents")
+        sample_count = payload.get("sampleCount") or payload.get("sample_count")
+
+        item = {
+            "id": str(uuid.uuid4()),
+            "song_id": song_id,
+            "user_id": user_id,
+            "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+            "comment_title": str(comment_title),
+            "comment_body": str(comment_body),
+
+            "score100": score100,
+            "score100_strict": score100_strict,
+            "score100_octave_invariant": score100_oct,
+            "octave_invariant_now": octave_now,
+
+            "tol_cents": tol_cents,
+            "percent_within_tol": percent_within,
+            "mean_abs_cents": mean_abs,
+            "sample_count": sample_count,
+        }
+
+        items = _load_history(user_id)
+        items.append(item)
+
+        # 新しい順にしたいならここで並べ替え（created_at文字列でもISOならソートできる）
+        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        _save_history(user_id, items)
+
+        return jsonify({"ok": True, "item": item})
+
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# --------------------------------------------------
+# 履歴：一覧 API（今はUI無くてもOK）
+# 例: GET /api/history/user01
+# --------------------------------------------------
+@app.get("/api/history/<user_id>")
+def history_list(user_id: str):
+    try:
+        items = _load_history(user_id)
+        return jsonify({"ok": True, "user_id": user_id, "items": items})
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# --------------------------------------------------
+# 履歴：削除 API（今はUI無くてもOK）
+# 例: DELETE /api/history/user01/<history_id>
+# --------------------------------------------------
+@app.delete("/api/history/<user_id>/<history_id>")
+def history_delete(user_id: str, history_id: str):
+    try:
+        items = _load_history(user_id)
+        before = len(items)
+        items = [x for x in items if str(x.get("id")) != str(history_id)]
+        _save_history(user_id, items)
+        deleted = (before != len(items))
+        return jsonify({"ok": True, "message": "deleted" if deleted else "not_found"})
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)

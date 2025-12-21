@@ -51,7 +51,7 @@ final class AnalysisAPI {
     // ----------------------------
     
     /// 例: sessionId = "orphans/user01" を /api/history/<song>/<user>/append に保存
-    func appendHistory(sessionId: String, reqBody: HistorySaveRequest) async throws -> HistoryAppendResponse {
+    func appendHistory(sessionId: String, reqBody: HistorySaveRequest) async throws -> HistorySaveResponse {
         let (songId, userId) = try splitSessionId(sessionId)
         
         let url = URL(string: "\(baseURL.absoluteString)/api/history/\(songId)/\(userId)/append")!
@@ -67,8 +67,9 @@ final class AnalysisAPI {
                           userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
         }
         
-        return try JSONDecoder().decode(HistoryAppendResponse.self, from: data)
+        return try JSONDecoder().decode(HistorySaveResponse.self, from: data)
     }
+
     
     // （将来使うなら）
     func fetchHistoryList(userId: String) async throws -> HistoryListResponse {

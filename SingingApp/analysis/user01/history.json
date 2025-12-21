@@ -1,5 +1,21 @@
 [
   {
+    "id": "588bb9c9-4316-4933-87e2-e4d17a5ff18f",
+    "song_id": "orphans",
+    "user_id": "user01",
+    "created_at": "2025-12-19T07:41:03",
+    "comment_title": "音程コメント",
+    "comment_body": "今は全体に低めに外れる区間が目立ちます。\n息が弱くて声が下がりやすい可能性があります。\n今日やる練習1 口をすぼめて小さく息を出しながら同じ高さで声を伸ばす。\n今日やる練習2 サビ前のフレーズを一段上を意識してゆっくり歌い録音して聞き直す。\n目標 低いほうに落ちる回数を減らしてまっすぐ当てる。\n続ければ必ず良くなります。",
+    "score100": 23.454367026496563,
+    "score100_strict": null,
+    "score100_octave_invariant": 23.454367026496563,
+    "octave_invariant_now": true,
+    "tol_cents": 40,
+    "percent_within_tol": 0.23454367026496564,
+    "mean_abs_cents": 158.9605822701996,
+    "sample_count": 1019
+  },
+  {
     "id": "9ccda465-f037-4720-bc4e-4fd79f6b81fd",
     "song_id": "orphans",
     "user_id": "user01",

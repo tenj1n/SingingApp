@@ -1,13 +1,18 @@
 # SingingApp/server.py
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from pathlib import Path
-import uuid, json
 import os
-from datetime import datetime
+import json
+import uuid
+import sqlite3
+from uuid import uuid4
+from pathlib import Path
+from datetime import datetime, timezone
+
+from flask import Flask, request, jsonify, g
+from flask_cors import CORS
 
 from openai import OpenAI  # pip install openai
+
 
 app = Flask(__name__)
 CORS(app)
@@ -17,9 +22,13 @@ openai_client = OpenAI()
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BASE_DIR / "SingingApp"
 ANALYSIS_DIR = PROJECT_DIR / "analysis"
+ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
 
 UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# SQLite DB
+DB_PATH = ANALYSIS_DIR / "history.sqlite3"
 
 
 # --------------------------------------------------
@@ -70,31 +79,83 @@ def _normalize_ai_comment(text: str):
     return "AIコメント", t
 
 
+def iso_utc_z():
+    # iOS側の createdAtShort が扱いやすい形式に寄せる
+    # 例: 2025-12-19T10:00:00Z
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 # --------------------------------------------------
-# 履歴（JSONファイル）ユーティリティ
+# SQLite（履歴）ヘルパー
 # --------------------------------------------------
-def _history_path(user_id: str) -> Path:
-    usr_dir = ANALYSIS_DIR / user_id
-    usr_dir.mkdir(parents=True, exist_ok=True)
-    return usr_dir / "history.json"
+def get_db():
+    if "db" not in g:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        g.db = conn
+    return g.db
 
 
-def _load_history(user_id: str):
-    p = _history_path(user_id)
-    if not p.exists():
-        return []
-    try:
-        with p.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+@app.teardown_appcontext
+def close_db(exception=None):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
 
 
-def _save_history(user_id: str, items):
-    p = _history_path(user_id)
-    with p.open("w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS history (
+            id TEXT PRIMARY KEY,
+            song_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+
+            comment_title TEXT NOT NULL,
+            comment_body  TEXT NOT NULL,
+
+            score100 REAL,
+            score100_strict REAL,
+            score100_octave_invariant REAL,
+            octave_invariant_now INTEGER,
+
+            tol_cents REAL,
+            percent_within_tol REAL,
+            mean_abs_cents REAL,
+            sample_count INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at DESC)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def row_to_item(r: sqlite3.Row):
+    # iOSの HistoryItem.CodingKeys に合わせて snake_case で返す
+    return {
+        "id": r["id"],
+        "song_id": r["song_id"],
+        "user_id": r["user_id"],
+        "created_at": r["created_at"],
+
+        "comment_title": r["comment_title"],
+        "comment_body": r["comment_body"],
+
+        "score100": r["score100"],
+        "score100_strict": r["score100_strict"],
+        "score100_octave_invariant": r["score100_octave_invariant"],
+        "octave_invariant_now": (bool(r["octave_invariant_now"]) if r["octave_invariant_now"] is not None else None),
+
+        "tol_cents": r["tol_cents"],
+        "percent_within_tol": r["percent_within_tol"],
+        "mean_abs_cents": r["mean_abs_cents"],
+        "sample_count": r["sample_count"],
+    }
 
 
 # --------------------------------------------------
@@ -298,7 +359,7 @@ def ai_comment(song_id: str, user_id: str):
 
 
 # --------------------------------------------------
-# ★履歴：追加（保存） API
+# ★履歴：追加（保存） API（SQLite）
 # 例: POST /api/history/orphans/user01/append
 # --------------------------------------------------
 @app.post("/api/history/<song_id>/<user_id>/append")
@@ -306,32 +367,60 @@ def history_append(song_id: str, user_id: str):
     try:
         payload = request.get_json(silent=True) or {}
 
-        # iOSからは camelCase で来てもOKにする
+        # iOSからは camelCase で来る（snake_case も許容）
         comment_title = payload.get("commentTitle") or payload.get("comment_title") or "AIコメント"
         comment_body  = payload.get("commentBody")  or payload.get("comment_body")  or ""
+
+        if not str(comment_body).strip():
+            return jsonify({"ok": False, "item": None, "message": "commentBody is empty"}), 400
 
         score100 = payload.get("score100")
         score100_strict = payload.get("score100Strict") or payload.get("score100_strict")
         score100_oct = payload.get("score100OctaveInvariant") or payload.get("score100_octave_invariant")
-        octave_now = payload.get("octaveInvariantNow") or payload.get("octave_invariant_now")
+        octave_now = payload.get("octaveInvariantNow") if "octaveInvariantNow" in payload else payload.get("octave_invariant_now")
 
         tol_cents = payload.get("tolCents") or payload.get("tol_cents")
         percent_within = payload.get("percentWithinTol") or payload.get("percent_within_tol")
         mean_abs = payload.get("meanAbsCents") or payload.get("mean_abs_cents")
         sample_count = payload.get("sampleCount") or payload.get("sample_count")
 
+        history_id = str(uuid.uuid4())
+        created_at = iso_utc_z()
+
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO history (
+                id, song_id, user_id, created_at,
+                comment_title, comment_body,
+                score100, score100_strict, score100_octave_invariant, octave_invariant_now,
+                tol_cents, percent_within_tol, mean_abs_cents, sample_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                history_id, song_id, user_id, created_at,
+                str(comment_title), str(comment_body),
+                score100, score100_strict, score100_oct,
+                1 if bool(octave_now) else 0,
+                tol_cents, percent_within, mean_abs, sample_count
+            )
+        )
+        db.commit()
+
+        # 返却（snake_case）
         item = {
-            "id": str(uuid.uuid4()),
+            "id": history_id,
             "song_id": song_id,
             "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+            "created_at": created_at,
+
             "comment_title": str(comment_title),
             "comment_body": str(comment_body),
 
             "score100": score100,
             "score100_strict": score100_strict,
             "score100_octave_invariant": score100_oct,
-            "octave_invariant_now": octave_now,
+            "octave_invariant_now": bool(octave_now),
 
             "tol_cents": tol_cents,
             "percent_within_tol": percent_within,
@@ -339,49 +428,53 @@ def history_append(song_id: str, user_id: str):
             "sample_count": sample_count,
         }
 
-        items = _load_history(user_id)
-        items.append(item)
-
-        # 新しい順にしたいならここで並べ替え（created_at文字列でもISOならソートできる）
-        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-
-        _save_history(user_id, items)
-
-        return jsonify({"ok": True, "item": item})
+        return jsonify({"ok": True, "item": item, "message": None})
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 # --------------------------------------------------
-# 履歴：一覧 API（今はUI無くてもOK）
+# 履歴：一覧 API（SQLite）
 # 例: GET /api/history/user01
 # --------------------------------------------------
 @app.get("/api/history/<user_id>")
 def history_list(user_id: str):
     try:
-        items = _load_history(user_id)
-        return jsonify({"ok": True, "user_id": user_id, "items": items})
+        db = get_db()
+        rows = db.execute(
+            "SELECT * FROM history WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
+        ).fetchall()
+
+        items = [row_to_item(r) for r in rows]
+        return jsonify({"ok": True, "user_id": user_id, "items": items, "message": None})
+
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 # --------------------------------------------------
-# 履歴：削除 API（今はUI無くてもOK）
+# 履歴：削除 API（SQLite）
 # 例: DELETE /api/history/user01/<history_id>
 # --------------------------------------------------
 @app.delete("/api/history/<user_id>/<history_id>")
 def history_delete(user_id: str, history_id: str):
     try:
-        items = _load_history(user_id)
-        before = len(items)
-        items = [x for x in items if str(x.get("id")) != str(history_id)]
-        _save_history(user_id, items)
-        deleted = (before != len(items))
+        db = get_db()
+        cur = db.execute(
+            "DELETE FROM history WHERE user_id = ? AND id = ?",
+            (user_id, history_id)
+        )
+        db.commit()
+
+        deleted = (cur.rowcount or 0) > 0
         return jsonify({"ok": True, "message": "deleted" if deleted else "not_found"})
+
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 if __name__ == "__main__":
+    init_db()
     app.run(host="127.0.0.1", port=5000, debug=True)

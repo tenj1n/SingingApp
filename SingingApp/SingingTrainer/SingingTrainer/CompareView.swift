@@ -122,7 +122,7 @@ struct CompareView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
     
-    // MARK: - Comment  ★ここに追加する
+    // MARK: - Comment
     
     private func commentSection() -> some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -1,10 +1,8 @@
-# SingingApp/server.py
-
 import os
 import json
 import uuid
 import sqlite3
-from uuid import uuid4
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -29,6 +27,15 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # SQLite DB
 DB_PATH = ANALYSIS_DIR / "history.sqlite3"
+
+# --------------------------------------------------
+# 研究ログ用の「実験条件」デフォルト
+# --------------------------------------------------
+# プロンプトを変えたらここを v2, v3... と更新する想定
+PROMPT_VERSION_DEFAULT = "v1"
+
+# ai_comment() で使っているモデル名（履歴にも入れる）
+AI_MODEL_NAME = "gpt-5.2"
 
 
 # --------------------------------------------------
@@ -80,7 +87,6 @@ def _normalize_ai_comment(text: str):
 
 
 def iso_utc_z():
-    # iOS側の createdAtShort が扱いやすい形式に寄せる
     # 例: 2025-12-19T10:00:00Z
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -105,6 +111,8 @@ def close_db(exception=None):
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+
+    # 新規DBなら最初から全部の列を作る
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS history (
@@ -124,27 +132,54 @@ def init_db():
             tol_cents REAL,
             percent_within_tol REAL,
             mean_abs_cents REAL,
-            sample_count INTEGER
+            sample_count INTEGER,
+
+            -- 二重保存防止
+            client_hash TEXT,
+
+            -- 研究ログ用（実験条件）
+            comment_source TEXT,
+            prompt_version TEXT,
+            model TEXT,
+            app_version TEXT
         )
         """
     )
 
-    # 既存DBに client_hash カラムが無ければ追加
+    # 既存DBへの後付け（列が無い場合だけ追加）
     cols = [r[1] for r in conn.execute("PRAGMA table_info(history)").fetchall()]
-    if "client_hash" not in cols:
-        conn.execute("ALTER TABLE history ADD COLUMN client_hash TEXT")
+
+    def add_col(name: str, ddl: str):
+        if name not in cols:
+            conn.execute(ddl)
+
+    add_col("client_hash", "ALTER TABLE history ADD COLUMN client_hash TEXT")
+    add_col("comment_source", "ALTER TABLE history ADD COLUMN comment_source TEXT")
+    add_col("prompt_version", "ALTER TABLE history ADD COLUMN prompt_version TEXT")
+    add_col("model", "ALTER TABLE history ADD COLUMN model TEXT")
+    add_col("app_version", "ALTER TABLE history ADD COLUMN app_version TEXT")
 
     # user_id + client_hash で一意（同じ保存内容は二重に入らない）
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_user_client_hash ON history(user_id, client_hash)"
     )
 
+    # よく使う並び順
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at DESC)"
     )
 
+    # 研究用途：sourceやprompt_versionで絞るなら便利（任意）
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_user_source_created ON history(user_id, comment_source, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_user_prompt_created ON history(user_id, prompt_version, created_at DESC)"
+    )
+
     conn.commit()
     conn.close()
+
 
 def row_to_item(r: sqlite3.Row):
     # iOSの HistoryItem.CodingKeys に合わせて snake_case で返す
@@ -166,6 +201,12 @@ def row_to_item(r: sqlite3.Row):
         "percent_within_tol": r["percent_within_tol"],
         "mean_abs_cents": r["mean_abs_cents"],
         "sample_count": r["sample_count"],
+
+        # ★研究ログ用（追加）
+        "comment_source": r["comment_source"],
+        "prompt_version": r["prompt_version"],
+        "model": r["model"],
+        "app_version": r["app_version"],
     }
 
 
@@ -351,7 +392,7 @@ def ai_comment(song_id: str, user_id: str):
         user = "次のJSONを読んでコメントを作成してください。\n" + json.dumps(model_input, ensure_ascii=False)
 
         resp = openai_client.responses.create(
-            model="gpt-5.2",
+            model=AI_MODEL_NAME,
             input=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -361,7 +402,8 @@ def ai_comment(song_id: str, user_id: str):
         llm_text = (getattr(resp, "output_text", "") or "").strip()
         title, body = _normalize_ai_comment(llm_text)
 
-        return jsonify({"ok": True, "title": title, "body": body})
+        # 研究用途：APIで返すだけ（保存は iOS が /append でやる）
+        return jsonify({"ok": True, "title": title, "body": body, "model": AI_MODEL_NAME, "prompt_version": PROMPT_VERSION_DEFAULT})
 
     except RuntimeError as e:
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
@@ -373,8 +415,6 @@ def ai_comment(song_id: str, user_id: str):
 # ★履歴：追加（保存） API（SQLite）
 # 例: POST /api/history/orphans/user01/append
 # --------------------------------------------------
-import hashlib  # 先頭のimport群に追加しておいてください
-
 @app.post("/api/history/<song_id>/<user_id>/append")
 def history_append(song_id: str, user_id: str):
     try:
@@ -411,6 +451,14 @@ def history_append(song_id: str, user_id: str):
             # 万一ヘッダーが無い場合の保険（raw bodyで作る）
             client_hash = hashlib.sha256(raw).hexdigest()
 
+        # ★研究ログ用（実験条件）
+        # iOS側をまだ変えない前提で、基本はサーバ側デフォルト
+        # もし後で iOS から送るなら、ヘッダーを使うと簡単
+        comment_source = request.headers.get("X-Comment-Source") or "ai"
+        prompt_version = request.headers.get("X-Prompt-Version") or PROMPT_VERSION_DEFAULT
+        model_name = request.headers.get("X-AI-Model") or AI_MODEL_NAME
+        app_version = request.headers.get("X-App-Version")  # 無ければ None のまま
+
         history_id = str(uuid.uuid4())
         created_at = iso_utc_z()
 
@@ -424,8 +472,9 @@ def history_append(song_id: str, user_id: str):
                 comment_title, comment_body,
                 score100, score100_strict, score100_octave_invariant, octave_invariant_now,
                 tol_cents, percent_within_tol, mean_abs_cents, sample_count,
-                client_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                client_hash,
+                comment_source, prompt_version, model, app_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 history_id, song_id, user_id, created_at,
@@ -433,7 +482,8 @@ def history_append(song_id: str, user_id: str):
                 score100, score100_strict, score100_oct,
                 1 if bool(octave_now) else 0,
                 tol_cents, percent_within, mean_abs, sample_count,
-                client_hash
+                client_hash,
+                comment_source, prompt_version, model_name, app_version
             )
         )
         db.commit()
@@ -445,14 +495,13 @@ def history_append(song_id: str, user_id: str):
                 (user_id, client_hash)
             ).fetchone()
 
-            # 念のため（通常rowはある）
             if row is None:
                 return jsonify({"ok": True, "item": None, "message": "duplicate"}), 200
 
             item = row_to_item(row)
             return jsonify({"ok": True, "item": item, "message": "duplicate"}), 200
 
-        # 追加成功した場合は、いま入れたものを返す
+        # 追加成功した場合
         item = {
             "id": history_id,
             "song_id": song_id,
@@ -471,11 +520,18 @@ def history_append(song_id: str, user_id: str):
             "percent_within_tol": percent_within,
             "mean_abs_cents": mean_abs,
             "sample_count": sample_count,
+
+            # ★研究ログ用（追加）
+            "comment_source": comment_source,
+            "prompt_version": prompt_version,
+            "model": model_name,
+            "app_version": app_version,
         }
         return jsonify({"ok": True, "item": item, "message": None})
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
+
 
 # --------------------------------------------------
 # 履歴：一覧 API（SQLite）

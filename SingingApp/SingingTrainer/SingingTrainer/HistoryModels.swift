@@ -23,7 +23,12 @@ struct HistoryItem: Codable, Identifiable {
     let percentWithinTol: Double?
     let meanAbsCents: Double?
     let sampleCount: Int?
-    
+    // 研究ログ用
+    let commentSource: String?
+    let promptVersion: String?
+    let model: String?
+    let appVersion: String?
+
     enum CodingKeys: String, CodingKey {
         case id
         case songId = "song_id"
@@ -39,6 +44,11 @@ struct HistoryItem: Codable, Identifiable {
         case percentWithinTol = "percent_within_tol"
         case meanAbsCents = "mean_abs_cents"
         case sampleCount = "sample_count"
+        case commentSource = "comment_source"
+        case promptVersion = "prompt_version"
+        case model
+        case appVersion = "app_version"
+
     }
     
     /// CompareView 用のセッションID（song/user）

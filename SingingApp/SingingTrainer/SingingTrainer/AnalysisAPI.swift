@@ -66,6 +66,7 @@ final class AnalysisAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.setValue(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",forHTTPHeaderField:"X-App-Version")
         request.httpBody = bodyData
         
         let (data, response) = try await URLSession.shared.data(for: request)

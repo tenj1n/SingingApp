@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 final class AnalysisAPI {
     static let shared = AnalysisAPI()
@@ -51,15 +52,21 @@ final class AnalysisAPI {
     // ----------------------------
     
     /// 例: sessionId = "orphans/user01" を /api/history/<song>/<user>/append に保存
+    /// ★Idempotency-Key を付与して二重保存を防ぐ
     func appendHistory(sessionId: String, reqBody: HistorySaveRequest) async throws -> HistorySaveResponse {
         let (songId, userId) = try splitSessionId(sessionId)
         
         let url = URL(string: "\(baseURL.absoluteString)/api/history/\(songId)/\(userId)/append")!
         
+        // 送信JSONを安定的にハッシュ化（同じ内容なら同じキーになる）
+        let bodyData = try JSONEncoder().encode(reqBody)
+        let idempotencyKey = Self.sha256Hex(Data((sessionId + ":").utf8) + bodyData)
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(reqBody)
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = bodyData
         
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
@@ -69,9 +76,10 @@ final class AnalysisAPI {
         
         return try JSONDecoder().decode(HistorySaveResponse.self, from: data)
     }
-
     
-    // （将来使うなら）
+    // ----------------------------
+    // 履歴：一覧
+    // ----------------------------
     func fetchHistoryList(userId: String) async throws -> HistoryListResponse {
         let url = URL(string: "\(baseURL.absoluteString)/api/history/\(userId)")!
         let (data, response) = try await URLSession.shared.data(from: url)
@@ -84,6 +92,9 @@ final class AnalysisAPI {
         return try JSONDecoder().decode(HistoryListResponse.self, from: data)
     }
     
+    // ----------------------------
+    // 履歴：削除
+    // ----------------------------
     func deleteHistory(userId: String, historyId: String) async throws -> SimpleOkResponse {
         let url = URL(string: "\(baseURL.absoluteString)/api/history/\(userId)/\(historyId)")!
         
@@ -102,6 +113,7 @@ final class AnalysisAPI {
     // ----------------------------
     // util
     // ----------------------------
+    
     private func splitSessionId(_ sessionId: String) throws -> (songId: String, userId: String) {
         let parts = sessionId.split(separator: "/").map(String.init)
         guard parts.count >= 2 else {
@@ -109,5 +121,10 @@ final class AnalysisAPI {
                           userInfo: [NSLocalizedDescriptionKey: "sessionIdの形式が不正です: \(sessionId)"])
         }
         return (parts[0], parts[1])
+    }
+    
+    private static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

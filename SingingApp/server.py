@@ -128,12 +128,23 @@ def init_db():
         )
         """
     )
+
+    # 既存DBに client_hash カラムが無ければ追加
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(history)").fetchall()]
+    if "client_hash" not in cols:
+        conn.execute("ALTER TABLE history ADD COLUMN client_hash TEXT")
+
+    # user_id + client_hash で一意（同じ保存内容は二重に入らない）
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_user_client_hash ON history(user_id, client_hash)"
+    )
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at DESC)"
     )
+
     conn.commit()
     conn.close()
-
 
 def row_to_item(r: sqlite3.Row):
     # iOSの HistoryItem.CodingKeys に合わせて snake_case で返す
@@ -362,9 +373,13 @@ def ai_comment(song_id: str, user_id: str):
 # ★履歴：追加（保存） API（SQLite）
 # 例: POST /api/history/orphans/user01/append
 # --------------------------------------------------
+import hashlib  # 先頭のimport群に追加しておいてください
+
 @app.post("/api/history/<song_id>/<user_id>/append")
 def history_append(song_id: str, user_id: str):
     try:
+        # raw body（ハッシュ用）※ cache=True で後の get_json と両立
+        raw = request.get_data(cache=True) or b""
         payload = request.get_json(silent=True) or {}
 
         # 0.0 や False を潰さない取り方
@@ -380,7 +395,6 @@ def history_append(song_id: str, user_id: str):
         if not str(comment_body).strip():
             return jsonify({"ok": False, "item": None, "message": "commentBody is empty"}), 400
 
-        # ★数値・boolは pick で取る（0.0/Falseが消えない）
         score100 = pick(payload, "score100", "score100")
         score100_strict = pick(payload, "score100Strict", "score100_strict")
         score100_oct = pick(payload, "score100OctaveInvariant", "score100_octave_invariant")
@@ -391,30 +405,54 @@ def history_append(song_id: str, user_id: str):
         mean_abs = pick(payload, "meanAbsCents", "mean_abs_cents")
         sample_count = pick(payload, "sampleCount", "sample_count")
 
+        # ★二重保存防止キー（iOSがヘッダーで送る）
+        client_hash = request.headers.get("Idempotency-Key")
+        if not client_hash:
+            # 万一ヘッダーが無い場合の保険（raw bodyで作る）
+            client_hash = hashlib.sha256(raw).hexdigest()
+
         history_id = str(uuid.uuid4())
         created_at = iso_utc_z()
 
         db = get_db()
-        db.execute(
+
+        # ★重複は INSERT しない
+        cur = db.execute(
             """
-            INSERT INTO history (
+            INSERT OR IGNORE INTO history (
                 id, song_id, user_id, created_at,
                 comment_title, comment_body,
                 score100, score100_strict, score100_octave_invariant, octave_invariant_now,
-                tol_cents, percent_within_tol, mean_abs_cents, sample_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tol_cents, percent_within_tol, mean_abs_cents, sample_count,
+                client_hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 history_id, song_id, user_id, created_at,
                 str(comment_title), str(comment_body),
                 score100, score100_strict, score100_oct,
                 1 if bool(octave_now) else 0,
-                tol_cents, percent_within, mean_abs, sample_count
+                tol_cents, percent_within, mean_abs, sample_count,
+                client_hash
             )
         )
         db.commit()
 
-        # 返却（snake_case）
+        # 追加できなかった＝既に同じ client_hash が存在（重複）
+        if (cur.rowcount or 0) == 0:
+            row = db.execute(
+                "SELECT * FROM history WHERE user_id = ? AND client_hash = ? ORDER BY created_at DESC LIMIT 1",
+                (user_id, client_hash)
+            ).fetchone()
+
+            # 念のため（通常rowはある）
+            if row is None:
+                return jsonify({"ok": True, "item": None, "message": "duplicate"}), 200
+
+            item = row_to_item(row)
+            return jsonify({"ok": True, "item": item, "message": "duplicate"}), 200
+
+        # 追加成功した場合は、いま入れたものを返す
         item = {
             "id": history_id,
             "song_id": song_id,
@@ -434,7 +472,6 @@ def history_append(song_id: str, user_id: str):
             "mean_abs_cents": mean_abs,
             "sample_count": sample_count,
         }
-
         return jsonify({"ok": True, "item": item, "message": None})
 
     except Exception as e:

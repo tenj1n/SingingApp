@@ -15,10 +15,8 @@ struct HistoryListView: View {
                 
                 // ★フィルタ行
                 VStack(alignment: .leading, spacing: 10) {
-                    
                     Toggle("AIのみ", isOn: $vm.onlyAI)
                     
-                    // B-1 prompt
                     Picker("prompt", selection: $vm.promptFilter) {
                         ForEach(HistoryViewModel.PromptFilter.allCases) { p in
                             Text(p.label).tag(p)
@@ -26,7 +24,6 @@ struct HistoryListView: View {
                     }
                     .pickerStyle(.segmented)
                     
-                    // B-2 model（segmentedだと窮屈なのでmenu）
                     Picker("model", selection: $vm.modelFilter) {
                         ForEach(HistoryViewModel.ModelFilter.allCases) { m in
                             Text(m.label).tag(m)
@@ -44,19 +41,13 @@ struct HistoryListView: View {
             }
             .navigationTitle("履歴")
             .toolbar { EditButton() }
-            .onAppear { vm.load() }
+            .onAppear { vm.resetAndLoad() }
             
-            // どれか変わったら再取得
-            .onChange(of: vm.onlyAI) { _, _ in
-                vm.load()
-            }
-            .onChange(of: vm.promptFilter) { _, _ in
-                vm.load()
-            }
-            .onChange(of: vm.modelFilter) { _, _ in
-                vm.load()
-            }
-       }
+            // フィルタが変わったら「先頭から」取り直す
+            .onChange(of: vm.onlyAI) { _, _ in vm.resetAndLoad() }
+            .onChange(of: vm.promptFilter) { _, _ in vm.resetAndLoad() }
+            .onChange(of: vm.modelFilter) { _, _ in vm.resetAndLoad() }
+        }
     }
     
     @ViewBuilder
@@ -68,15 +59,14 @@ struct HistoryListView: View {
             
         } else if let err = vm.errorMessage, !err.isEmpty {
             VStack(spacing: 12) {
-                Text("取得に失敗しました")
-                    .font(.headline)
+                Text("取得に失敗しました").font(.headline)
                 
                 Text(err)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 
-                Button("再読み込み") { vm.load() }
+                Button("再読み込み") { vm.resetAndLoad() }
                     .buttonStyle(.borderedProminent)
             }
             .padding()
@@ -84,11 +74,12 @@ struct HistoryListView: View {
             
         } else if vm.items.isEmpty {
             VStack(spacing: 10) {
-                Text("履歴がありません")
-                    .font(.headline)
+                Text("履歴がありません").font(.headline)
+                
                 Text("条件: \(vm.currentFilterLabel)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                
                 Text(vm.onlyAI
                      ? "AIの履歴がありません（トグルをOFFにすると全件表示に戻ります）"
                      : "サーバ側の /api/history に保存した記録がここに出ます。")
@@ -98,6 +89,7 @@ struct HistoryListView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            
         } else {
             List {
                 ForEach(vm.items) { item in
@@ -125,6 +117,25 @@ struct HistoryListView: View {
                     }
                 }
                 .onDelete(perform: vm.delete)
+                
+                // ★ページング（自動じゃなくボタン）
+                if vm.canLoadMore || vm.isLoadingMore {
+                    HStack {
+                        Spacer()
+                        Button {
+                            vm.loadMore()
+                        } label: {
+                            if vm.isLoadingMore {
+                                ProgressView()
+                            } else {
+                                Text("次の5件を読み込む")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(vm.isLoadingMore)
+                        Spacer()
+                    }
+                }
             }
         }
     }

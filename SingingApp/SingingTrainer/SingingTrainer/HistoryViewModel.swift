@@ -4,7 +4,8 @@ import SwiftUI
 @MainActor
 final class HistoryViewModel: ObservableObject {
     @Published var items: [HistoryItem] = []
-    @Published var isLoading = false
+    @Published var isLoading = false          // 初回/リセット読み込み用
+    @Published var isLoadingMore = false      // 追加読み込み用
     @Published var errorMessage: String?
     
     // 既に作った：AIのみ
@@ -26,9 +27,7 @@ final class HistoryViewModel: ObservableObject {
             }
         }
         
-        var queryValue: String? {
-            rawValue.isEmpty ? nil : rawValue
-        }
+        var queryValue: String? { rawValue.isEmpty ? nil : rawValue }
     }
     @Published var promptFilter: PromptFilter = .all
     
@@ -46,45 +45,64 @@ final class HistoryViewModel: ObservableObject {
             }
         }
         
-        var queryValue: String? {
-            rawValue.isEmpty ? nil : rawValue
-        }
+        var queryValue: String? { rawValue.isEmpty ? nil : rawValue }
     }
     @Published var modelFilter: ModelFilter = .all
     
-    // ★追加：0件のときに「どの条件で0件か」を表示するためのラベル
+    // ★0件のときに「どの条件で0件か」を表示するためのラベル
     var currentFilterLabel: String {
         var parts: [String] = []
-        
         if onlyAI { parts.append("AIのみ") }
-        
-        if let p = promptFilter.queryValue {
-            parts.append("prompt=\(p)")
-        } else {
-            parts.append("prompt=全部")
-        }
-        
-        if let m = modelFilter.queryValue {
-            parts.append("model=\(m)")
-        } else {
-            parts.append("model=全部")
-        }
-        
+        parts.append("prompt=\(promptFilter.queryValue ?? "全部")")
+        parts.append("model=\(modelFilter.queryValue ?? "全部")")
         return parts.joined(separator: " / ")
     }
     
     private let userId: String
     
+    // ----------------------------
+    // paging state
+    // ----------------------------
+    private let pageSize = 5
+    private var offset = 0
+    private var hasMore = true
+    
+    var canLoadMore: Bool { hasMore && !isLoading && !isLoadingMore }
+    
     init(userId: String) {
         self.userId = userId
     }
     
-    func load() {
-        guard !isLoading else { return }
-        isLoading = true
+    // 画面表示/フィルタ変更時はこれ
+    func resetAndLoad() {
+        offset = 0
+        hasMore = true
+        items.removeAll()
+        loadNextPage(isReset: true)
+    }
+    
+    // 「次の5件」ボタンで呼ぶ
+    func loadMore() {
+        loadNextPage(isReset: false)
+    }
+    
+    private func loadNextPage(isReset: Bool) {
+        if isReset {
+            guard !isLoading else { return }
+            isLoading = true
+        } else {
+            guard canLoadMore else { return }
+            isLoadingMore = true
+        }
+        
         errorMessage = nil
         
         Task {
+            defer {
+                isLoading = false
+                isLoadingMore = false
+            }
+            
             do {
                 let source = onlyAI ? "ai" : nil
                 
@@ -92,18 +110,30 @@ final class HistoryViewModel: ObservableObject {
                     userId: userId,
                     source: source,
                     prompt: promptFilter.queryValue,
-                    model: modelFilter.queryValue
+                    model: modelFilter.queryValue,
+                    limit: pageSize,
+                    offset: offset
                 )
                 
-                if res.ok {
-                    items = res.items
-                } else {
+                guard res.ok else {
                     errorMessage = res.message ?? "履歴の取得に失敗しました"
+                    return
                 }
-                isLoading = false
+                
+                let newItems = res.items
+                
+                // 追加
+                items.append(contentsOf: newItems)
+                
+                // 次のoffsetへ
+                offset += newItems.count
+                
+                // 返ってきた件数が pageSize 未満なら「もう次は無い」
+                if newItems.count < pageSize {
+                    hasMore = false
+                }
             } catch {
                 errorMessage = error.localizedDescription
-                isLoading = false
             }
         }
     }
@@ -116,8 +146,8 @@ final class HistoryViewModel: ObservableObject {
             for t in targets {
                 _ = try? await AnalysisAPI.shared.deleteHistory(userId: userId, historyId: t.id)
             }
-            // フィルタ状態を保ったまま再取得
-            load()
+            // 削除後はズレやすいので先頭から取り直す
+            resetAndLoad()
         }
     }
 }

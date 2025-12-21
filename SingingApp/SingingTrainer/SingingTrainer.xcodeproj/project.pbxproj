@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		04771B8A2EF7EE6400E70CDB /* VoiceUploadResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B892EF7EE6400E70CDB /* VoiceUploadResponse.swift */; };
+		04771B8C2EF7EEB000E70CDB /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8B2EF7EEB000E70CDB /* VoiceRecorder.swift */; };
+		04771B8E2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8D2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift */; };
+		04771B902EF7EEED00E70CDB /* RecordVoiceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */; };
+		04771B922EF7EF0700E70CDB /* RecordVoiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */; };
 		0477B11E2EEAF2E4006C6113 /* compare.png in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11D2EEAF2E4006C6113 /* compare.png */; };
 		0477B1222EEAFAFA006C6113 /* summary.txt in Resources */ = {isa = PBXBuildFile; fileRef = 0477B1212EEAFAFA006C6113 /* summary.txt */; };
 		0477B1232EEAFAFA006C6113 /* events.json in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11F2EEAFAFA006C6113 /* events.json */; };
@@ -14,6 +19,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		04771B892EF7EE6400E70CDB /* VoiceUploadResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceUploadResponse.swift; sourceTree = "<group>"; };
+		04771B8B2EF7EEB000E70CDB /* VoiceRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
+		04771B8D2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AnalysisAPI+VoiceUpload.swift"; sourceTree = "<group>"; };
+		04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordVoiceViewModel.swift; sourceTree = "<group>"; };
+		04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordVoiceView.swift; sourceTree = "<group>"; };
 		0477B1142EEAE880006C6113 /* SingingTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SingingTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0477B11D2EEAF2E4006C6113 /* compare.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = compare.png; path = ../analysis/songs/orphans/export/compare.png; sourceTree = SOURCE_ROOT; };
 		0477B11F2EEAFAFA006C6113 /* events.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = events.json; path = ../analysis/songs/orphans/export/events.json; sourceTree = SOURCE_ROOT; };
@@ -21,9 +31,22 @@
 		0477B1212EEAFAFA006C6113 /* summary.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = summary.txt; path = ../analysis/songs/orphans/export/summary.txt; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		04771B942EF7FAAF00E70CDB /* Exceptions for "SingingTrainer" folder in "SingingTrainer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 04C379702EE15F6100A38580 /* SingingTrainer */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		04C379732EE15F6100A38580 /* SingingTrainer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				04771B942EF7FAAF00E70CDB /* Exceptions for "SingingTrainer" folder in "SingingTrainer" target */,
+			);
 			path = SingingTrainer;
 			sourceTree = "<group>";
 		};
@@ -40,9 +63,55 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		04771B682EF7EB1600E70CDB /* API */ = {
+			isa = PBXGroup;
+			children = (
+				04771B892EF7EE6400E70CDB /* VoiceUploadResponse.swift */,
+				04771B8D2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift */,
+			);
+			path = API;
+			sourceTree = "<group>";
+		};
+		04771B6A2EF7EB1600E70CDB /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				04771B8B2EF7EEB000E70CDB /* VoiceRecorder.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		04771B6B2EF7EB1600E70CDB /* RecordVoice */ = {
+			isa = PBXGroup;
+			children = (
+				04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */,
+				04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */,
+			);
+			path = RecordVoice;
+			sourceTree = "<group>";
+		};
+		04771B6C2EF7EB1600E70CDB /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				04771B6B2EF7EB1600E70CDB /* RecordVoice */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		04771B6D2EF7EB1600E70CDB /* App */ = {
+			isa = PBXGroup;
+			children = (
+				04771B682EF7EB1600E70CDB /* API */,
+				04771B6A2EF7EB1600E70CDB /* Audio */,
+				04771B6C2EF7EB1600E70CDB /* Features */,
+			);
+			name = App;
+			path = ../App;
+			sourceTree = "<group>";
+		};
 		04C379682EE15F6100A38580 = {
 			isa = PBXGroup;
 			children = (
+				04771B6D2EF7EB1600E70CDB /* App */,
 				04C379732EE15F6100A38580 /* SingingTrainer */,
 				0477B1142EEAE880006C6113 /* SingingTrainer.app */,
 				0477B11D2EEAF2E4006C6113 /* compare.png */,
@@ -130,6 +199,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				04771B8C2EF7EEB000E70CDB /* VoiceRecorder.swift in Sources */,
+				04771B902EF7EEED00E70CDB /* RecordVoiceViewModel.swift in Sources */,
+				04771B8E2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift in Sources */,
+				04771B8A2EF7EE6400E70CDB /* VoiceUploadResponse.swift in Sources */,
+				04771B922EF7EF0700E70CDB /* RecordVoiceView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -264,6 +338,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SingingTrainer/Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "歌声を録音して分析するためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -291,6 +367,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SingingTrainer/Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "歌声を録音して分析するためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -3,9 +3,21 @@ import CryptoKit
 
 final class AnalysisAPI {
     static let shared = AnalysisAPI()
-    private init() {}
+    private init() {
+        // 実機対応したい場合：
+        // Target > Info に "API_BASE_URL" = "http://10.77.113.122:5000" を追加するとそれを使う
+        if
+            let s = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String,
+            let u = URL(string: s)
+        {
+            self.baseURL = u
+        } else {
+            self.baseURL = URL(string: "http://127.0.0.1:5000")!
+        }
+    }
     
-    private let baseURL = URL(string: "http://127.0.0.1:5000")!
+    // ★ private を外す（extension から見える必要がある）
+    let baseURL: URL
     
     /// 例: sessionId = "orphans/user01"
     func fetchAnalysis(sessionId: String) async throws -> AnalysisResponse {
@@ -13,8 +25,11 @@ final class AnalysisAPI {
         let (data, response) = try await URLSession.shared.data(from: url)
         
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
+            )
         }
         
         return try JSONDecoder().decode(AnalysisResponse.self, from: data)
@@ -40,8 +55,11 @@ final class AnalysisAPI {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
+            )
         }
         
         return try JSONDecoder().decode(AICommentResponse.self, from: data)
@@ -55,7 +73,6 @@ final class AnalysisAPI {
     /// Idempotency-Key を付与して二重保存を防ぐ
     func appendHistory(sessionId: String, reqBody: HistorySaveRequest) async throws -> HistorySaveResponse {
         let (songId, userId) = try splitSessionId(sessionId)
-        
         let url = URL(string: "\(baseURL.absoluteString)/api/history/\(songId)/\(userId)/append")!
         
         // 送信JSONを安定的にハッシュ化（同じ内容なら同じキーになる）
@@ -74,8 +91,11 @@ final class AnalysisAPI {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
+            )
         }
         
         return try JSONDecoder().decode(HistorySaveResponse.self, from: data)
@@ -93,7 +113,7 @@ final class AnalysisAPI {
         offset: Int? = nil
     ) async throws -> HistoryListResponse {
         
-        // ✅ "/" を含む文字列を appendingPathComponent に渡さない
+        // "/" を含む文字列を appendingPathComponent に渡さない
         let urlBase = baseURL
             .appendingPathComponent("api")
             .appendingPathComponent("history")
@@ -111,14 +131,20 @@ final class AnalysisAPI {
         if !q.isEmpty { components?.queryItems = q }
         
         guard let url = components?.url else {
-            throw NSError(domain: "AnalysisAPI", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "URLの生成に失敗しました"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "URLの生成に失敗しました"]
+            )
         }
         
         let (data, response) = try await URLSession.shared.data(from: url)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
+            )
         }
         
         return try JSONDecoder().decode(HistoryListResponse.self, from: data)
@@ -135,8 +161,11 @@ final class AnalysisAPI {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw NSError(domain: "AnalysisAPI", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]
+            )
         }
         
         return try JSONDecoder().decode(SimpleOkResponse.self, from: data)
@@ -149,8 +178,11 @@ final class AnalysisAPI {
     private func splitSessionId(_ sessionId: String) throws -> (songId: String, userId: String) {
         let parts = sessionId.split(separator: "/").map(String.init)
         guard parts.count >= 2 else {
-            throw NSError(domain: "AnalysisAPI", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "sessionIdの形式が不正です: \(sessionId)"])
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "sessionIdの形式が不正です: \(sessionId)"]
+            )
         }
         return (parts[0], parts[1])
     }

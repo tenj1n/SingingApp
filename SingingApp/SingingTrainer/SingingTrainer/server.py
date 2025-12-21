@@ -22,8 +22,13 @@ PROJECT_DIR = BASE_DIR / "SingingApp"
 ANALYSIS_DIR = PROJECT_DIR / "analysis"
 ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
 
+# 既存：アップロード（保存のみ）用
 UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# 追加：歌声アップロード保存先（ユーザ別）
+VOICE_ROOT = ANALYSIS_DIR / "voices"
+VOICE_ROOT.mkdir(parents=True, exist_ok=True)
 
 # SQLite DB
 DB_PATH = ANALYSIS_DIR / "history.sqlite3"
@@ -31,10 +36,7 @@ DB_PATH = ANALYSIS_DIR / "history.sqlite3"
 # --------------------------------------------------
 # 研究ログ用の「実験条件」デフォルト
 # --------------------------------------------------
-# プロンプトを変えたらここを v2, v3... と更新する想定
 PROMPT_VERSION_DEFAULT = "v1"
-
-# ai_comment() で使っているモデル名（履歴にも入れる）
 AI_MODEL_NAME = "gpt-5.2"
 
 
@@ -68,11 +70,9 @@ def require_openai_key_or_error():
 
 
 def _normalize_ai_comment(text: str):
-    # ```json ... ``` を剥がす
     t = (text or "").strip()
     t = t.replace("```json", "").replace("```", "").strip()
 
-    # JSONなら parse
     try:
         obj = json.loads(t)
         if isinstance(obj, dict):
@@ -82,13 +82,15 @@ def _normalize_ai_comment(text: str):
     except Exception:
         pass
 
-    # ダメならそのまま本文
     return "AIコメント", t
 
 
 def iso_utc_z():
-    # 例: 2025-12-19T10:00:00Z
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def ensure_dir(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
 
 
 # --------------------------------------------------
@@ -112,7 +114,6 @@ def close_db(exception=None):
 def init_db():
     conn = sqlite3.connect(DB_PATH)
 
-    # 新規DBなら最初から全部の列を作る
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS history (
@@ -134,10 +135,8 @@ def init_db():
             mean_abs_cents REAL,
             sample_count INTEGER,
 
-            -- 二重保存防止
             client_hash TEXT,
 
-            -- 研究ログ用（実験条件）
             comment_source TEXT,
             prompt_version TEXT,
             model TEXT,
@@ -146,7 +145,6 @@ def init_db():
         """
     )
 
-    # 既存DBへの後付け（列が無い場合だけ追加）
     cols = [r[1] for r in conn.execute("PRAGMA table_info(history)").fetchall()]
 
     def add_col(name: str, ddl: str):
@@ -159,17 +157,12 @@ def init_db():
     add_col("model", "ALTER TABLE history ADD COLUMN model TEXT")
     add_col("app_version", "ALTER TABLE history ADD COLUMN app_version TEXT")
 
-    # user_id + client_hash で一意（同じ保存内容は二重に入らない）
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_user_client_hash ON history(user_id, client_hash)"
     )
-
-    # よく使う並び順
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at DESC)"
     )
-
-    # 研究用途：sourceやprompt_versionで絞るなら便利（任意）
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_history_user_source_created ON history(user_id, comment_source, created_at DESC)"
     )
@@ -182,7 +175,6 @@ def init_db():
 
 
 def row_to_item(r: sqlite3.Row):
-    # iOSの HistoryItem.CodingKeys に合わせて snake_case で返す
     return {
         "id": r["id"],
         "song_id": r["song_id"],
@@ -202,7 +194,6 @@ def row_to_item(r: sqlite3.Row):
         "mean_abs_cents": r["mean_abs_cents"],
         "sample_count": r["sample_count"],
 
-        # ★研究ログ用（追加）
         "comment_source": r["comment_source"],
         "prompt_version": r["prompt_version"],
         "model": r["model"],
@@ -219,7 +210,8 @@ def health():
 
 
 # --------------------------------------------------
-# 録音ファイルアップロード
+# 既存：録音ファイルアップロード（保存のみ）
+# フィールド名: audio
 # --------------------------------------------------
 @app.post("/upload")
 def upload():
@@ -243,6 +235,60 @@ def upload():
             "note": "保存のみ。解析は別エンドポイントで行う想定。",
         }
     )
+
+
+# --------------------------------------------------
+# 追加：ユーザ歌声アップロード（比較に使う入口）
+# POST /api/voice/<user_id>
+# multipart: file または audio を受け取る（両対応）
+# query: ?song_id=orphans（未指定なら orphans）
+# 保存先: analysis/voices/<user_id>/
+# --------------------------------------------------
+@app.post("/api/voice/<user_id>")
+def upload_voice(user_id: str):
+    try:
+        # CompareView が想定する song_id/user_id 形式に合わせる
+        song_id = request.args.get("song_id") or "orphans"
+
+        # フォームフィールド名は file / audio どっちでも受ける
+        f = request.files.get("file") or request.files.get("audio")
+        if f is None:
+            return json_error(400, "BAD_REQUEST", "file is required (multipart field name: file or audio)")
+
+        if not f.filename:
+            return json_error(400, "BAD_REQUEST", "empty filename")
+
+        # 拡張子（iOSはwav推奨。m4aでも一旦保存はできる）
+        ext = (Path(f.filename).suffix or ".wav").lower()
+        if ext not in [".wav", ".m4a", ".caf", ".aac"]:
+            # とりあえず弾く。必要なら許可拡張子を増やす
+            return json_error(400, "BAD_REQUEST", f"unsupported extension: {ext}")
+
+        user_dir = VOICE_ROOT / user_id
+        ensure_dir(user_dir)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        short = uuid.uuid4().hex[:8]
+        file_id = uuid.uuid4().hex
+        filename = f"user_voice_{ts}_{short}_{file_id}{ext}"
+        save_path = user_dir / filename
+        f.save(save_path)
+
+        # ここが重要：アプリ側がそのまま CompareView(sessionId:) に渡せる形
+        session_id = f"{song_id}/{user_id}"
+
+        return jsonify({
+            "ok": True,
+            "session_id": session_id,
+            "song_id": song_id,
+            "user_id": user_id,
+            "file_id": file_id,
+            "saved_path": str(save_path),
+            "message": "saved"
+        })
+
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 # --------------------------------------------------
@@ -402,7 +448,6 @@ def ai_comment(song_id: str, user_id: str):
         llm_text = (getattr(resp, "output_text", "") or "").strip()
         title, body = _normalize_ai_comment(llm_text)
 
-        # 研究用途：APIで返すだけ（保存は iOS が /append でやる）
         return jsonify({"ok": True, "title": title, "body": body, "model": AI_MODEL_NAME, "prompt_version": PROMPT_VERSION_DEFAULT})
 
     except RuntimeError as e:
@@ -418,17 +463,14 @@ def ai_comment(song_id: str, user_id: str):
 @app.post("/api/history/<song_id>/<user_id>/append")
 def history_append(song_id: str, user_id: str):
     try:
-        # raw body（ハッシュ用）※ cache=True で後の get_json と両立
         raw = request.get_data(cache=True) or b""
         payload = request.get_json(silent=True) or {}
 
-        # 0.0 や False を潰さない取り方
         def pick(payload, camel, snake):
             if camel in payload:
                 return payload[camel]
             return payload.get(snake)
 
-        # iOSからは camelCase で来る（snake_case も許容）
         comment_title = payload.get("commentTitle") or payload.get("comment_title") or "AIコメント"
         comment_body  = payload.get("commentBody")  or payload.get("comment_body")  or ""
 
@@ -445,26 +487,20 @@ def history_append(song_id: str, user_id: str):
         mean_abs = pick(payload, "meanAbsCents", "mean_abs_cents")
         sample_count = pick(payload, "sampleCount", "sample_count")
 
-        # ★二重保存防止キー（iOSがヘッダーで送る）
         client_hash = request.headers.get("Idempotency-Key")
         if not client_hash:
-            # 万一ヘッダーが無い場合の保険（raw bodyで作る）
             client_hash = hashlib.sha256(raw).hexdigest()
 
-        # ★研究ログ用（実験条件）
-        # iOS側をまだ変えない前提で、基本はサーバ側デフォルト
-        # もし後で iOS から送るなら、ヘッダーを使うと簡単
         comment_source = request.headers.get("X-Comment-Source") or "ai"
         prompt_version = request.headers.get("X-Prompt-Version") or PROMPT_VERSION_DEFAULT
         model_name = request.headers.get("X-AI-Model") or AI_MODEL_NAME
-        app_version = request.headers.get("X-App-Version")  # 無ければ None のまま
+        app_version = request.headers.get("X-App-Version")
 
         history_id = str(uuid.uuid4())
         created_at = iso_utc_z()
 
         db = get_db()
 
-        # ★重複は INSERT しない
         cur = db.execute(
             """
             INSERT OR IGNORE INTO history (
@@ -488,7 +524,6 @@ def history_append(song_id: str, user_id: str):
         )
         db.commit()
 
-        # 追加できなかった＝既に同じ client_hash が存在（重複）
         if (cur.rowcount or 0) == 0:
             row = db.execute(
                 "SELECT * FROM history WHERE user_id = ? AND client_hash = ? ORDER BY created_at DESC LIMIT 1",
@@ -501,7 +536,6 @@ def history_append(song_id: str, user_id: str):
             item = row_to_item(row)
             return jsonify({"ok": True, "item": item, "message": "duplicate"}), 200
 
-        # 追加成功した場合
         item = {
             "id": history_id,
             "song_id": song_id,
@@ -521,7 +555,6 @@ def history_append(song_id: str, user_id: str):
             "mean_abs_cents": mean_abs,
             "sample_count": sample_count,
 
-            # ★研究ログ用（追加）
             "comment_source": comment_source,
             "prompt_version": prompt_version,
             "model": model_name,
@@ -541,14 +574,12 @@ def history_append(song_id: str, user_id: str):
 @app.get("/api/history/<user_id>")
 def history_list(user_id: str):
     try:
-        # クエリ（未指定なら None）
-        source = request.args.get("source")          # 例: ai
-        prompt = request.args.get("prompt")          # 例: v1
-        model  = request.args.get("model")           # 例: gpt-5.2
-        limit  = request.args.get("limit", type=int) # 例: 50
+        source = request.args.get("source")
+        prompt = request.args.get("prompt")
+        model  = request.args.get("model")
+        limit  = request.args.get("limit", type=int)
         offset = request.args.get("offset", type=int)
 
-        # limitの安全策
         if limit is None:
             limit = 200
         limit = max(1, min(limit, 500))
@@ -562,7 +593,6 @@ def history_list(user_id: str):
         where = ["user_id = ?"]
         params = [user_id]
 
-        # 追加フィルタ（指定されたものだけ）
         if source:
             where.append("comment_source = ?")
             params.append(source)

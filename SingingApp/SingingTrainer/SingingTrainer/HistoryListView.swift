@@ -86,7 +86,9 @@ struct HistoryListView: View {
             VStack(spacing: 10) {
                 Text("履歴がありません")
                     .font(.headline)
-                
+                Text("条件: \(vm.currentFilterLabel)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text(vm.onlyAI
                      ? "AIの履歴がありません（トグルをOFFにすると全件表示に戻ります）"
                      : "サーバ側の /api/history に保存した記録がここに出ます。")

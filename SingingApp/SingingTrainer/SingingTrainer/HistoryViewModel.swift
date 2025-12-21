@@ -10,7 +10,7 @@ final class HistoryViewModel: ObservableObject {
     // 既に作った：AIのみ
     @Published var onlyAI = false
     
-    // ★追加：promptフィルタ（B-1）
+    // ★promptフィルタ（B-1）
     enum PromptFilter: String, CaseIterable, Identifiable {
         case all = ""   // 指定なし
         case v1 = "v1"
@@ -25,10 +25,14 @@ final class HistoryViewModel: ObservableObject {
             case .v2:  return "v2"
             }
         }
+        
+        var queryValue: String? {
+            rawValue.isEmpty ? nil : rawValue
+        }
     }
     @Published var promptFilter: PromptFilter = .all
     
-    // ★追加：modelフィルタ（B-2）
+    // ★modelフィルタ（B-2）
     enum ModelFilter: String, CaseIterable, Identifiable {
         case all = ""        // 指定なし
         case gpt52 = "gpt-5.2"
@@ -41,8 +45,33 @@ final class HistoryViewModel: ObservableObject {
             case .gpt52: return "gpt-5.2"
             }
         }
+        
+        var queryValue: String? {
+            rawValue.isEmpty ? nil : rawValue
+        }
     }
     @Published var modelFilter: ModelFilter = .all
+    
+    // ★追加：0件のときに「どの条件で0件か」を表示するためのラベル
+    var currentFilterLabel: String {
+        var parts: [String] = []
+        
+        if onlyAI { parts.append("AIのみ") }
+        
+        if let p = promptFilter.queryValue {
+            parts.append("prompt=\(p)")
+        } else {
+            parts.append("prompt=全部")
+        }
+        
+        if let m = modelFilter.queryValue {
+            parts.append("model=\(m)")
+        } else {
+            parts.append("model=全部")
+        }
+        
+        return parts.joined(separator: " / ")
+    }
     
     private let userId: String
     
@@ -58,14 +87,12 @@ final class HistoryViewModel: ObservableObject {
         Task {
             do {
                 let source = onlyAI ? "ai" : nil
-                let prompt = promptFilter.rawValue.isEmpty ? nil : promptFilter.rawValue
-                let model  = modelFilter.rawValue.isEmpty ? nil : modelFilter.rawValue
                 
                 let res = try await AnalysisAPI.shared.fetchHistoryList(
                     userId: userId,
                     source: source,
-                    prompt: prompt,
-                    model: model
+                    prompt: promptFilter.queryValue,
+                    model: modelFilter.queryValue
                 )
                 
                 if res.ok {

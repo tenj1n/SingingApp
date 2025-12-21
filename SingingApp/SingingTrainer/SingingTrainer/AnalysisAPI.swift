@@ -66,7 +66,10 @@ final class AnalysisAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
-        request.setValue(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",forHTTPHeaderField:"X-App-Version")
+        request.setValue(
+            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            forHTTPHeaderField: "X-App-Version"
+        )
         request.httpBody = bodyData
         
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -90,30 +93,22 @@ final class AnalysisAPI {
         offset: Int? = nil
     ) async throws -> HistoryListResponse {
         
-        let base = baseURL.appendingPathComponent("api/history/\(userId)")
+        // ✅ "/" を含む文字列を appendingPathComponent に渡さない
+        let urlBase = baseURL
+            .appendingPathComponent("api")
+            .appendingPathComponent("history")
+            .appendingPathComponent(userId)
         
-        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        var components = URLComponents(url: urlBase, resolvingAgainstBaseURL: false)
         var q: [URLQueryItem] = []
         
-        if let source, !source.isEmpty {
-            q.append(URLQueryItem(name: "source", value: source))   // 例: ai
-        }
-        if let prompt, !prompt.isEmpty {
-            q.append(URLQueryItem(name: "prompt", value: prompt))   // 例: v1
-        }
-        if let model, !model.isEmpty {
-            q.append(URLQueryItem(name: "model", value: model))     // 例: gpt-5.2
-        }
-        if let limit {
-            q.append(URLQueryItem(name: "limit", value: String(limit)))
-        }
-        if let offset {
-            q.append(URLQueryItem(name: "offset", value: String(offset)))
-        }
+        if let source, !source.isEmpty { q.append(.init(name: "source", value: source)) }
+        if let prompt, !prompt.isEmpty { q.append(.init(name: "prompt", value: prompt)) }
+        if let model, !model.isEmpty { q.append(.init(name: "model", value: model)) }
+        if let limit { q.append(.init(name: "limit", value: String(limit))) }
+        if let offset { q.append(.init(name: "offset", value: String(offset))) }
         
-        if !q.isEmpty {
-            components?.queryItems = q
-        }
+        if !q.isEmpty { components?.queryItems = q }
         
         guard let url = components?.url else {
             throw NSError(domain: "AnalysisAPI", code: -1,
@@ -128,7 +123,7 @@ final class AnalysisAPI {
         
         return try JSONDecoder().decode(HistoryListResponse.self, from: data)
     }
-
+    
     // ----------------------------
     // 履歴：削除
     // ----------------------------

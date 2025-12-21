@@ -222,7 +222,17 @@ final class CompareViewModel: ObservableObject {
             meanAbsCents: meanAbsCents,
             sampleCount: sampleCount
         )
-        
+        print("=== HistorySaveRequest ===")
+        print("score100:", score100)
+        print("score100Strict:", score100Strict)
+        print("score100OctaveInvariant:", score100OctaveInvariant)
+        print("octaveInvariantNow:", octaveInvariant)
+        print("tolCents:", (analysis?.summary?.tolCents ?? 40.0))
+        print("percentWithinTol:", percentWithinTol)
+        print("meanAbsCents:", meanAbsCents)
+        print("sampleCount:", sampleCount)
+        print("==========================")
+
         Task {
             do {
                 let res = try await AnalysisAPI.shared.appendHistory(sessionId: sessionId, reqBody: req)

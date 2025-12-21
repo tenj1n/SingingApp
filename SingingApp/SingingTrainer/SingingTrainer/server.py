@@ -367,6 +367,12 @@ def history_append(song_id: str, user_id: str):
     try:
         payload = request.get_json(silent=True) or {}
 
+        # 0.0 や False を潰さない取り方
+        def pick(payload, camel, snake):
+            if camel in payload:
+                return payload[camel]
+            return payload.get(snake)
+
         # iOSからは camelCase で来る（snake_case も許容）
         comment_title = payload.get("commentTitle") or payload.get("comment_title") or "AIコメント"
         comment_body  = payload.get("commentBody")  or payload.get("comment_body")  or ""
@@ -374,15 +380,16 @@ def history_append(song_id: str, user_id: str):
         if not str(comment_body).strip():
             return jsonify({"ok": False, "item": None, "message": "commentBody is empty"}), 400
 
-        score100 = payload.get("score100")
-        score100_strict = payload.get("score100Strict") or payload.get("score100_strict")
-        score100_oct = payload.get("score100OctaveInvariant") or payload.get("score100_octave_invariant")
-        octave_now = payload.get("octaveInvariantNow") if "octaveInvariantNow" in payload else payload.get("octave_invariant_now")
+        # ★数値・boolは pick で取る（0.0/Falseが消えない）
+        score100 = pick(payload, "score100", "score100")
+        score100_strict = pick(payload, "score100Strict", "score100_strict")
+        score100_oct = pick(payload, "score100OctaveInvariant", "score100_octave_invariant")
+        octave_now = pick(payload, "octaveInvariantNow", "octave_invariant_now")
 
-        tol_cents = payload.get("tolCents") or payload.get("tol_cents")
-        percent_within = payload.get("percentWithinTol") or payload.get("percent_within_tol")
-        mean_abs = payload.get("meanAbsCents") or payload.get("mean_abs_cents")
-        sample_count = payload.get("sampleCount") or payload.get("sample_count")
+        tol_cents = pick(payload, "tolCents", "tol_cents")
+        percent_within = pick(payload, "percentWithinTol", "percent_within_tol")
+        mean_abs = pick(payload, "meanAbsCents", "mean_abs_cents")
+        sample_count = pick(payload, "sampleCount", "sample_count")
 
         history_id = str(uuid.uuid4())
         created_at = iso_utc_z()
@@ -432,7 +439,6 @@ def history_append(song_id: str, user_id: str):
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
-
 
 # --------------------------------------------------
 # 履歴：一覧 API（SQLite）

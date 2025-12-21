@@ -536,18 +536,91 @@ def history_append(song_id: str, user_id: str):
 # --------------------------------------------------
 # 履歴：一覧 API（SQLite）
 # 例: GET /api/history/user01
+# 追加: ?source=ai&prompt=v1&model=gpt-5.2&limit=50&offset=0
 # --------------------------------------------------
 @app.get("/api/history/<user_id>")
 def history_list(user_id: str):
     try:
-        db = get_db()
-        rows = db.execute(
-            "SELECT * FROM history WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,)
-        ).fetchall()
+        # クエリ（未指定なら None）
+        source = request.args.get("source")          # 例: ai
+        prompt = request.args.get("prompt")          # 例: v1
+        model  = request.args.get("model")           # 例: gpt-5.2
+        limit  = request.args.get("limit", type=int) # 例: 50
+        offset = request.args.get("offset", type=int)
 
-        items = [row_to_item(r) for r in rows]
-        return jsonify({"ok": True, "user_id": user_id, "items": items, "message": None})
+        # limitの安全策
+        if limit is None:
+            limit = 200
+        limit = max(1, min(limit, 500))
+
+        if offset is None:
+            offset = 0
+        offset = max(0, offset)
+
+        db = get_db()
+
+        where = ["user_id = ?"]
+        params = [user_id]
+
+        # 追加フィルタ（指定されたものだけ）
+        if source:
+            where.append("comment_source = ?")
+            params.append(source)
+        if prompt:
+            where.append("prompt_version = ?")
+            params.append(prompt)
+        if model:
+            where.append("model = ?")
+            params.append(model)
+
+        sql = f"""
+            SELECT
+                id, song_id, user_id, created_at,
+                comment_title, comment_body,
+                score100, score100_strict, score100_octave_invariant, octave_invariant_now,
+                tol_cents, percent_within_tol, mean_abs_cents, sample_count,
+                comment_source, prompt_version, model, app_version
+            FROM history
+            WHERE {" AND ".join(where)}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+
+        rows = db.execute(sql, tuple(params + [limit, offset])).fetchall()
+
+        items = []
+        for r in rows:
+            items.append({
+                "id": r["id"],
+                "song_id": r["song_id"],
+                "user_id": r["user_id"],
+                "created_at": r["created_at"],
+
+                "comment_title": r["comment_title"] or "",
+                "comment_body": r["comment_body"] or "",
+
+                "score100": r["score100"],
+                "score100_strict": r["score100_strict"],
+                "score100_octave_invariant": r["score100_octave_invariant"],
+                "octave_invariant_now": bool(r["octave_invariant_now"]) if r["octave_invariant_now"] is not None else None,
+
+                "tol_cents": r["tol_cents"],
+                "percent_within_tol": r["percent_within_tol"],
+                "mean_abs_cents": r["mean_abs_cents"],
+                "sample_count": r["sample_count"],
+
+                "comment_source": r["comment_source"],
+                "prompt_version": r["prompt_version"],
+                "model": r["model"],
+                "app_version": r["app_version"],
+            })
+
+        return jsonify({
+            "ok": True,
+            "user_id": user_id,
+            "items": items,
+            "message": None
+        })
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))

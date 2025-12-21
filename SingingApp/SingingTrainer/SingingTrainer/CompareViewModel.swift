@@ -31,7 +31,7 @@ final class CompareViewModel: ObservableObject {
     @Published var isAICommentLoading = false
     @Published var aiCommentError: String?
     
-    // ★履歴保存（手動）
+    // 履歴保存（手動）
     @Published var isHistorySaving = false
     @Published var historySaveError: String?
     @Published private(set) var didGenerateAIComment = false

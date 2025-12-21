@@ -52,7 +52,7 @@ final class AnalysisAPI {
     // ----------------------------
     
     /// 例: sessionId = "orphans/user01" を /api/history/<song>/<user>/append に保存
-    /// ★Idempotency-Key を付与して二重保存を防ぐ
+    /// Idempotency-Key を付与して二重保存を防ぐ
     func appendHistory(sessionId: String, reqBody: HistorySaveRequest) async throws -> HistorySaveResponse {
         let (songId, userId) = try splitSessionId(sessionId)
         

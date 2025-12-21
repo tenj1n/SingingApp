@@ -80,6 +80,16 @@ struct HistoryItem: Codable, Identifiable {
         fmt.dateFormat = "yyyy-MM-dd HH:mm"
         return fmt.string(from: d)
     }
+    var experimentShort: String {
+        let pv = promptVersion ?? "-"
+        let m  = model ?? "-"
+        if let av = appVersion, !av.isEmpty {
+            return "\(createdAtShort)  \(pv) / \(m)  app \(av)"
+        } else {
+            return "\(createdAtShort)  \(pv) / \(m)"
+        }
+    }
+
 }
 
 struct HistoryListResponse: Codable {

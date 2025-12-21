@@ -49,9 +49,11 @@ struct HistoryListView: View {
                                 .font(.headline)
                                 .lineLimit(1)
                             
-                            Text(item.createdAtShort)
+                            Text(item.experimentShort)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(2) // 1行で切れないように
+                                .fixedSize(horizontal: false, vertical: true) // 折り返し許可
                             
                             let s  = item.score100 ?? 0
                             let ss = item.score100Strict ?? 0
@@ -78,7 +80,7 @@ struct HistoryDetailView: View {
                     Text(item.commentTitle.isEmpty ? "AIコメント" : item.commentTitle)
                         .font(.title3.bold())
                     
-                    Text(item.createdAtShort)
+                    Text(item.experimentShort)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     

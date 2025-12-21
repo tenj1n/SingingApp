@@ -81,18 +81,32 @@ final class AnalysisAPI {
     // ----------------------------
     // 履歴：一覧
     // ----------------------------
-    func fetchHistoryList(userId: String) async throws -> HistoryListResponse {
-        let url = URL(string: "\(baseURL.absoluteString)/api/history/\(userId)")!
-        let (data, response) = try await URLSession.shared.data(from: url)
+    func fetchHistoryList(userId: String, source: String? = nil) async throws -> HistoryListResponse {
+        // baseURL: http://127.0.0.1:5000
+        let base = baseURL.appendingPathComponent("api/history/\(userId)")
         
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        var q: [URLQueryItem] = []
+        if let source, !source.isEmpty {
+            q.append(URLQueryItem(name: "source", value: source)) // 例: ai
+        }
+        if !q.isEmpty {
+            components?.queryItems = q
+        }
+        
+        guard let url = components?.url else {
+            throw NSError(domain: "AnalysisAPI", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "URLの生成に失敗しました"])
+        }
+        
+        let (data, response) = try await URLSession.shared.data(from: url)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw NSError(domain: "AnalysisAPI", code: http.statusCode,
                           userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
         }
-        
         return try JSONDecoder().decode(HistoryListResponse.self, from: data)
     }
-    
+
     // ----------------------------
     // 履歴：削除
     // ----------------------------

@@ -11,10 +11,25 @@ struct HistoryListView: View {
     
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle("履歴")
-                .toolbar { EditButton() }
-                .onAppear { vm.load() }
+            VStack(spacing: 0) {
+                
+                // ★追加：AIのみトグル（上に固定表示）
+                Toggle("AIのみ", isOn: $vm.onlyAI)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                
+                Divider()
+                
+                content
+            }
+            .navigationTitle("履歴")
+            .toolbar { EditButton() }
+            .onAppear { vm.load() }
+            // ★追加：切り替えたら再取得
+            .onChange(of: vm.onlyAI) { _ in
+                vm.load()
+            }
         }
     }
     
@@ -22,6 +37,7 @@ struct HistoryListView: View {
     private var content: some View {
         if vm.isLoading {
             ProgressView("読み込み中…").padding()
+            
         } else if let err = vm.errorMessage, !err.isEmpty {
             VStack(spacing: 12) {
                 Text("取得に失敗しました").font(.headline)
@@ -30,14 +46,19 @@ struct HistoryListView: View {
                     .buttonStyle(.borderedProminent)
             }
             .padding()
+            
         } else if vm.items.isEmpty {
             VStack(spacing: 10) {
                 Text("履歴がありません").font(.headline)
-                Text("サーバ側の /api/history に保存した記録がここに出ます。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                
+                Text(vm.onlyAI
+                     ? "AIの履歴がありません（トグルをOFFにすると全件表示に戻ります）"
+                     : "サーバ側の /api/history に保存した記録がここに出ます。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             .padding()
+            
         } else {
             List {
                 ForEach(vm.items) { item in
@@ -107,4 +128,5 @@ struct HistoryDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
-#Preview {HistoryListView()}
+
+#Preview { HistoryListView() }

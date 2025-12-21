@@ -7,6 +7,9 @@ final class HistoryViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    // ★追加：AIのみトグル状態
+    @Published var onlyAI = false
+    
     private let userId: String
     
     init(userId: String) {
@@ -20,7 +23,10 @@ final class HistoryViewModel: ObservableObject {
         
         Task {
             do {
-                let res = try await AnalysisAPI.shared.fetchHistoryList(userId: userId)
+                // ★ここがA-2：トグル状態でsourceを切り替える
+                let source = onlyAI ? "ai" : nil
+                let res = try await AnalysisAPI.shared.fetchHistoryList(userId: userId, source: source)
+                
                 if res.ok {
                     items = res.items
                 } else {
@@ -42,6 +48,8 @@ final class HistoryViewModel: ObservableObject {
             for t in targets {
                 _ = try? await AnalysisAPI.shared.deleteHistory(userId: userId, historyId: t.id)
             }
+            // ★削除後に、フィルタ状態を保ったまま再取得
+            load()
         }
     }
 }

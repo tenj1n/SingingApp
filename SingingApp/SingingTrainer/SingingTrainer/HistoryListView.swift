@@ -13,11 +13,30 @@ struct HistoryListView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 
-                // ★追加：AIのみトグル（上に固定表示）
-                Toggle("AIのみ", isOn: $vm.onlyAI)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
+                // ★フィルタ行
+                VStack(alignment: .leading, spacing: 10) {
+                    
+                    Toggle("AIのみ", isOn: $vm.onlyAI)
+                    
+                    // B-1 prompt
+                    Picker("prompt", selection: $vm.promptFilter) {
+                        ForEach(HistoryViewModel.PromptFilter.allCases) { p in
+                            Text(p.label).tag(p)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    
+                    // B-2 model（segmentedだと窮屈なのでmenu）
+                    Picker("model", selection: $vm.modelFilter) {
+                        ForEach(HistoryViewModel.ModelFilter.allCases) { m in
+                            Text(m.label).tag(m)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
                 
                 Divider()
                 
@@ -26,39 +45,57 @@ struct HistoryListView: View {
             .navigationTitle("履歴")
             .toolbar { EditButton() }
             .onAppear { vm.load() }
-            // ★追加：切り替えたら再取得
-            .onChange(of: vm.onlyAI) { _ in
+            
+            // どれか変わったら再取得
+            .onChange(of: vm.onlyAI) { _, _ in
                 vm.load()
             }
-        }
+            .onChange(of: vm.promptFilter) { _, _ in
+                vm.load()
+            }
+            .onChange(of: vm.modelFilter) { _, _ in
+                vm.load()
+            }
+       }
     }
     
     @ViewBuilder
     private var content: some View {
         if vm.isLoading {
-            ProgressView("読み込み中…").padding()
+            ProgressView("読み込み中…")
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             
         } else if let err = vm.errorMessage, !err.isEmpty {
             VStack(spacing: 12) {
-                Text("取得に失敗しました").font(.headline)
-                Text(err).font(.caption).foregroundStyle(.secondary)
+                Text("取得に失敗しました")
+                    .font(.headline)
+                
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                
                 Button("再読み込み") { vm.load() }
                     .buttonStyle(.borderedProminent)
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             
         } else if vm.items.isEmpty {
             VStack(spacing: 10) {
-                Text("履歴がありません").font(.headline)
+                Text("履歴がありません")
+                    .font(.headline)
                 
                 Text(vm.onlyAI
                      ? "AIの履歴がありません（トグルをOFFにすると全件表示に戻ります）"
                      : "サーバ側の /api/history に保存した記録がここに出ます。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             }
             .padding()
-            
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else {
             List {
                 ForEach(vm.items) { item in
@@ -73,8 +110,8 @@ struct HistoryListView: View {
                             Text(item.experimentShort)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(2) // 1行で切れないように
-                                .fixedSize(horizontal: false, vertical: true) // 折り返し許可
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                             
                             let s  = item.score100 ?? 0
                             let ss = item.score100Strict ?? 0

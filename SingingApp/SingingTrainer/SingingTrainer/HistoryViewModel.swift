@@ -7,8 +7,42 @@ final class HistoryViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    // ★追加：AIのみトグル状態
+    // 既に作った：AIのみ
     @Published var onlyAI = false
+    
+    // ★追加：promptフィルタ（B-1）
+    enum PromptFilter: String, CaseIterable, Identifiable {
+        case all = ""   // 指定なし
+        case v1 = "v1"
+        case v2 = "v2"
+        
+        var id: String { rawValue }
+        
+        var label: String {
+            switch self {
+            case .all: return "全部"
+            case .v1:  return "v1"
+            case .v2:  return "v2"
+            }
+        }
+    }
+    @Published var promptFilter: PromptFilter = .all
+    
+    // ★追加：modelフィルタ（B-2）
+    enum ModelFilter: String, CaseIterable, Identifiable {
+        case all = ""        // 指定なし
+        case gpt52 = "gpt-5.2"
+        
+        var id: String { rawValue }
+        
+        var label: String {
+            switch self {
+            case .all:   return "全部"
+            case .gpt52: return "gpt-5.2"
+            }
+        }
+    }
+    @Published var modelFilter: ModelFilter = .all
     
     private let userId: String
     
@@ -23,9 +57,16 @@ final class HistoryViewModel: ObservableObject {
         
         Task {
             do {
-                // ★ここがA-2：トグル状態でsourceを切り替える
                 let source = onlyAI ? "ai" : nil
-                let res = try await AnalysisAPI.shared.fetchHistoryList(userId: userId, source: source)
+                let prompt = promptFilter.rawValue.isEmpty ? nil : promptFilter.rawValue
+                let model  = modelFilter.rawValue.isEmpty ? nil : modelFilter.rawValue
+                
+                let res = try await AnalysisAPI.shared.fetchHistoryList(
+                    userId: userId,
+                    source: source,
+                    prompt: prompt,
+                    model: model
+                )
                 
                 if res.ok {
                     items = res.items
@@ -48,7 +89,7 @@ final class HistoryViewModel: ObservableObject {
             for t in targets {
                 _ = try? await AnalysisAPI.shared.deleteHistory(userId: userId, historyId: t.id)
             }
-            // ★削除後に、フィルタ状態を保ったまま再取得
+            // フィルタ状態を保ったまま再取得
             load()
         }
     }

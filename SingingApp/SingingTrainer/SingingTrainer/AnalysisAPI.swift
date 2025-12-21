@@ -79,17 +79,38 @@ final class AnalysisAPI {
     }
     
     // ----------------------------
-    // 履歴：一覧
+    // 履歴：一覧（フィルタ対応）
     // ----------------------------
-    func fetchHistoryList(userId: String, source: String? = nil) async throws -> HistoryListResponse {
-        // baseURL: http://127.0.0.1:5000
+    func fetchHistoryList(
+        userId: String,
+        source: String? = nil,
+        prompt: String? = nil,
+        model: String? = nil,
+        limit: Int? = nil,
+        offset: Int? = nil
+    ) async throws -> HistoryListResponse {
+        
         let base = baseURL.appendingPathComponent("api/history/\(userId)")
         
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
         var q: [URLQueryItem] = []
+        
         if let source, !source.isEmpty {
-            q.append(URLQueryItem(name: "source", value: source)) // 例: ai
+            q.append(URLQueryItem(name: "source", value: source))   // 例: ai
         }
+        if let prompt, !prompt.isEmpty {
+            q.append(URLQueryItem(name: "prompt", value: prompt))   // 例: v1
+        }
+        if let model, !model.isEmpty {
+            q.append(URLQueryItem(name: "model", value: model))     // 例: gpt-5.2
+        }
+        if let limit {
+            q.append(URLQueryItem(name: "limit", value: String(limit)))
+        }
+        if let offset {
+            q.append(URLQueryItem(name: "offset", value: String(offset)))
+        }
+        
         if !q.isEmpty {
             components?.queryItems = q
         }
@@ -104,6 +125,7 @@ final class AnalysisAPI {
             throw NSError(domain: "AnalysisAPI", code: http.statusCode,
                           userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
         }
+        
         return try JSONDecoder().decode(HistoryListResponse.self, from: data)
     }
 

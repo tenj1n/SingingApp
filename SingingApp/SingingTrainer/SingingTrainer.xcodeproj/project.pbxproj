@@ -12,6 +12,11 @@
 		04771B8E2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8D2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift */; };
 		04771B902EF7EEED00E70CDB /* RecordVoiceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */; };
 		04771B922EF7EF0700E70CDB /* RecordVoiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */; };
+		04771B9D2EF8014000E70CDB /* KaraokePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B9C2EF8014000E70CDB /* KaraokePlayer.swift */; };
+		04771B9F2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 04771B9E2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a */; };
+		04771BA12EF808A900E70CDB /* songs.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA02EF808A900E70CDB /* songs.json */; };
+		04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA42EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a */; };
+		04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA82EF809EC00E70CDB /* orpheus_lyrics.json */; };
 		0477B11E2EEAF2E4006C6113 /* compare.png in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11D2EEAF2E4006C6113 /* compare.png */; };
 		0477B1222EEAFAFA006C6113 /* summary.txt in Resources */ = {isa = PBXBuildFile; fileRef = 0477B1212EEAFAFA006C6113 /* summary.txt */; };
 		0477B1232EEAFAFA006C6113 /* events.json in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11F2EEAFAFA006C6113 /* events.json */; };
@@ -24,6 +29,11 @@
 		04771B8D2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AnalysisAPI+VoiceUpload.swift"; sourceTree = "<group>"; };
 		04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordVoiceViewModel.swift; sourceTree = "<group>"; };
 		04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordVoiceView.swift; sourceTree = "<group>"; };
+		04771B9C2EF8014000E70CDB /* KaraokePlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KaraokePlayer.swift; sourceTree = "<group>"; };
+		04771B9E2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = 0005686800.320_no_voice_split_by_lalalai.m4a; sourceTree = "<group>"; };
+		04771BA02EF808A900E70CDB /* songs.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = songs.json; sourceTree = "<group>"; };
+		04771BA42EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a */ = {isa = PBXFileReference; lastKnownFileType = file; path = 0005686800.320_voice_split_by_lalalai.m4a; sourceTree = "<group>"; };
+		04771BA82EF809EC00E70CDB /* orpheus_lyrics.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = orpheus_lyrics.json; sourceTree = "<group>"; };
 		0477B1142EEAE880006C6113 /* SingingTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SingingTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0477B11D2EEAF2E4006C6113 /* compare.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = compare.png; path = ../analysis/songs/orphans/export/compare.png; sourceTree = SOURCE_ROOT; };
 		0477B11F2EEAFAFA006C6113 /* events.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = events.json; path = ../analysis/songs/orphans/export/events.json; sourceTree = SOURCE_ROOT; };
@@ -42,6 +52,21 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		04771B972EF800C400E70CDB /* Lyrics */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Lyrics;
+			sourceTree = "<group>";
+		};
+		04771BAA2EF80AAE00E70CDB /* Songs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Songs;
+			sourceTree = "<group>";
+		};
+		04771BB12EF80C7100E70CDB /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		04C379732EE15F6100A38580 /* SingingTrainer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -76,6 +101,11 @@
 			isa = PBXGroup;
 			children = (
 				04771B8B2EF7EEB000E70CDB /* VoiceRecorder.swift */,
+				04771B9C2EF8014000E70CDB /* KaraokePlayer.swift */,
+				04771B9E2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a */,
+				04771BA02EF808A900E70CDB /* songs.json */,
+				04771BA82EF809EC00E70CDB /* orpheus_lyrics.json */,
+				04771BA42EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -100,6 +130,9 @@
 		04771B6D2EF7EB1600E70CDB /* App */ = {
 			isa = PBXGroup;
 			children = (
+				04771BB12EF80C7100E70CDB /* Shared */,
+				04771BAA2EF80AAE00E70CDB /* Songs */,
+				04771B972EF800C400E70CDB /* Lyrics */,
 				04771B682EF7EB1600E70CDB /* API */,
 				04771B6A2EF7EB1600E70CDB /* Audio */,
 				04771B6C2EF7EB1600E70CDB /* Features */,
@@ -137,6 +170,9 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				04771B972EF800C400E70CDB /* Lyrics */,
+				04771BAA2EF80AAE00E70CDB /* Songs */,
+				04771BB12EF80C7100E70CDB /* Shared */,
 				04C379732EE15F6100A38580 /* SingingTrainer */,
 			);
 			name = SingingTrainer;
@@ -187,7 +223,11 @@
 			files = (
 				0477B1222EEAFAFA006C6113 /* summary.txt in Resources */,
 				0477B1232EEAFAFA006C6113 /* events.json in Resources */,
+				04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */,
+				04771B9F2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a in Resources */,
 				0477B1242EEAFAFA006C6113 /* summary.json in Resources */,
+				04771BA12EF808A900E70CDB /* songs.json in Resources */,
+				04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */,
 				0477B11E2EEAF2E4006C6113 /* compare.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -204,6 +244,7 @@
 				04771B8E2EF7EEC900E70CDB /* AnalysisAPI+VoiceUpload.swift in Sources */,
 				04771B8A2EF7EE6400E70CDB /* VoiceUploadResponse.swift in Sources */,
 				04771B922EF7EF0700E70CDB /* RecordVoiceView.swift in Sources */,
+				04771B9D2EF8014000E70CDB /* KaraokePlayer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

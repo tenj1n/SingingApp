@@ -1,0 +1,11 @@
+{
+    "songs": [
+        {
+            "id": "orpheus",
+            "title": "オルフェンズの涙",
+            "instrumental": "0005686800.320_no_voice_split_by_lalalai.m4a",
+            "singer": "0005686800.320_voice_split_by_lalalai.m4a",
+            "lyrics": "orpheus_lyrics.json"
+        }
+    ]
+}

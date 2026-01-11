@@ -1,312 +1,284 @@
+# server.py
+from __future__ import annotations
+
 import os
+import io
 import json
 import uuid
-import sqlite3
 import hashlib
-from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional  # ✅ 追加（Python 3.9 以下対応）
-
-from flask import Flask, request, jsonify, g
-from flask_cors import CORS
-
-from openai import OpenAI  # pip install openai
-
-# 追加（解析用）
+import sqlite3
+import wave
 import math
-import numpy as np
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional, Any, Dict, Tuple, List
 
+import numpy as np
+from flask import Flask, request, jsonify, g
+
+# ==================================================
+# Config
+# ==================================================
+AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "gpt-4.1-mini")
+PROMPT_VERSION_DEFAULT = os.getenv("PROMPT_VERSION_DEFAULT", "v1")
+
+# Pitch extraction config (FFT)
+PITCH_HOP = int(os.getenv("PITCH_HOP", "2048"))
+PITCH_FMIN = float(os.getenv("PITCH_FMIN", "80.0"))      # Hz
+PITCH_FMAX = float(os.getenv("PITCH_FMAX", "1000.0"))    # Hz
+PITCH_ENERGY_TH = float(os.getenv("PITCH_ENERGY_TH", "0.01"))  # RMS threshold (rough)
+PITCH_MAX_SECONDS = float(os.getenv("PITCH_MAX_SECONDS", "60.0"))  # safety cap
+
+# OpenAI (optional)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = None
 try:
-    import librosa
+    if OPENAI_API_KEY:
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception:
-    librosa = None
+    openai_client = None
 
 
 # ==================================================
-# App / Config
+# Path helpers
+# ==================================================
+def _find_project_root(start: Path) -> Path:
+    """
+    どこから実行しても安定して 'SingingApp/analysis' を見つけるために上へ辿る。
+    見つからなければ server.py の2階層上を仮ルートにする。
+    """
+    cur = start.resolve()
+    for _ in range(8):
+        if (cur / "SingingApp" / "analysis").exists():
+            return cur
+        cur = cur.parent
+    # fallback
+    return start.resolve().parent.parent
+
+
+BASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = _find_project_root(BASE_DIR)
+
+# iOS側のプロジェクト（ある場合）
+PROJECT_DIR = ROOT_DIR / "SingingApp"
+
+# 解析セッション置き場
+ANALYSIS_DIR = PROJECT_DIR / "analysis"
+SESSIONS_DIR = ANALYSIS_DIR / "sessions"
+
+# ★サーバ側の曲カタログ置き場（ここを固定にする）
+SERVER_SONGS_DIR = Path(os.getenv("SERVER_SONGS_DIR", str(ANALYSIS_DIR / "songs"))).resolve()
+SERVER_SONGS_JSON = Path(os.getenv("SERVER_SONGS_JSON", str(SERVER_SONGS_DIR / "songs.json"))).resolve()
+
+# DB
+DB_PATH = (ANALYSIS_DIR / "history.sqlite3").resolve()
+
+# ensure dirs
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+SERVER_SONGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ==================================================
+# Flask
 # ==================================================
 app = Flask(__name__)
-CORS(app)
-
-app.url_map.strict_slashes = False
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
-
-openai_client = OpenAI()
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-PROJECT_DIR = BASE_DIR / "SingingApp"
-ANALYSIS_DIR = PROJECT_DIR / "analysis"
-ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
-
-UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-VOICE_ROOT = ANALYSIS_DIR / "voices"
-VOICE_ROOT.mkdir(parents=True, exist_ok=True)
-
-SESSIONS_ROOT = ANALYSIS_DIR / "sessions"
-SESSIONS_ROOT.mkdir(parents=True, exist_ok=True)
-
-DB_PATH = ANALYSIS_DIR / "history.sqlite3"
-
-PROMPT_VERSION_DEFAULT = os.environ.get("PROMPT_VERSION_DEFAULT", "v1")
-AI_MODEL_NAME = os.environ.get("AI_MODEL_NAME", "gpt-5.2")
 
 
 # ==================================================
-# ✅ Reference audio location (あなたの構成に合わせる)
+# Utils
 # ==================================================
-APP_AUDIO_DIR = PROJECT_DIR / "App" / "Audio"
-
-# songs カタログ（Xcodeでは拡張子なしの "songs" になってる可能性があるので両対応）
-SONGS_CATALOG_CANDIDATES = [
-    APP_AUDIO_DIR / "songs.json",
-    APP_AUDIO_DIR / "songs",
-]
+def iso_utc_z() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ==================================================
-# Common helpers
-# ==================================================
+def safe_len(x: Any) -> Optional[int]:
+    try:
+        return len(x)
+    except Exception:
+        return None
+
+
 def json_error(status: int, code: str, message: str, **extra):
     payload = {"ok": False, "code": code, "message": message}
     if extra:
-        payload["extra"] = extra
+        payload.update(extra)
     return jsonify(payload), status
 
 
-def safe_len(x):
-    return len(x) if isinstance(x, list) else None
-
-
-def read_json_or_error(path: Path, label: str):
+def read_json_or_error(path: Path, label: str) -> Any:
     if not path.exists():
         raise FileNotFoundError(f"{label} not found: {path}")
+    text = path.read_text(encoding="utf-8")
     try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"{label} invalid JSON: {path} ({e})")
-
-
-def write_json(path: Path, obj):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-
-
-def require_openai_key_or_error():
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is not set (export OPENAI_API_KEY=...)")
-
-
-def _normalize_ai_comment(text: str):
-    t = (text or "").strip()
-    t = t.replace("```json", "").replace("```", "").strip()
-
-    try:
-        obj = json.loads(t)
-        if isinstance(obj, dict):
-            title = str(obj.get("title") or "AIコメント")
-            body = str(obj.get("body") or "")
-            return title, body
-    except Exception:
-        pass
-
-    return "AIコメント", t
-
-
-def iso_utc_z():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def make_take_id() -> str:
-    # 例: 20260109_211530_ab12cd
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    short = uuid.uuid4().hex[:6]
-    return f"{ts}_{short}"
-
-
-def parse_session_id(session_id: str):
-    """
-    session_id は以下を許容
-    - song/user
-    - song/user/take
-    それ以外はエラー
-    """
-    parts = [p for p in session_id.split("/") if p]
-    if len(parts) == 2:
-        return parts[0], parts[1], None
-    if len(parts) >= 3:
-        return parts[0], parts[1], parts[2]
-    raise ValueError(f"invalid session_id: {session_id}")
-
-
-def get_session_dir(song_id: str, user_id: str, take_id: Optional[str]) -> Path:
-    # ✅ Python 3.9 以下でも動くように Optional[str] に変更
-    if take_id:
-        return SESSIONS_ROOT / song_id / user_id / take_id
-    return SESSIONS_ROOT / song_id / user_id
+        return json.loads(text)
+    except Exception as e:
+        raise ValueError(f"{label} invalid json: {path} ({e})")
 
 
 # ==================================================
-# ✅ songs catalog / reference resolver
+# Song catalog (SERVER side)
 # ==================================================
-_songs_cache = None
+@dataclass(frozen=True)
+class SongItem:
+    id: str
+    title: str
+    instrumental: str
+    singer: str
+    lyrics: str
 
 
-def load_songs_catalog():
-    global _songs_cache
-    if _songs_cache is not None:
-        return _songs_cache
-
-    for p in SONGS_CATALOG_CANDIDATES:
-        if p.exists():
-            data = read_json_or_error(p, "songs_catalog")
-            # {"songs":[...]} 形式
-            songs = data.get("songs") if isinstance(data, dict) else None
-            if isinstance(songs, list):
-                _songs_cache = songs
-                return _songs_cache
-
-    # 見つからない場合は空
-    _songs_cache = []
-    return _songs_cache
+_song_cache: Dict[str, SongItem] = {}
+_song_cache_loaded_at: Optional[str] = None
 
 
-def resolve_song(song_id: str):
-    songs = load_songs_catalog()
+def _load_song_catalog_from_server() -> Dict[str, SongItem]:
+    """
+    SERVER_SONGS_JSON を読む。
+    例:
+    {
+      "songs": [
+        {"id":"orpheus","title":"...","instrumental":"xxx.m4a","singer":"yyy.m4a","lyrics":"orpheus_lyrics.json"}
+      ]
+    }
+    """
+    global _song_cache_loaded_at
+
+    if not SERVER_SONGS_JSON.exists():
+        raise FileNotFoundError(f"songs.json not found on server: {SERVER_SONGS_JSON}")
+
+    raw = read_json_or_error(SERVER_SONGS_JSON, "songs.json")
+    songs = raw.get("songs") if isinstance(raw, dict) else None
+    if not isinstance(songs, list):
+        raise ValueError(f"songs.json format invalid (songs is not list): {SERVER_SONGS_JSON}")
+
+    out: Dict[str, SongItem] = {}
     for s in songs:
-        if isinstance(s, dict) and s.get("id") == song_id:
-            return s
-    return None
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id") or "").strip()
+        if not sid:
+            continue
+
+        out[sid] = SongItem(
+            id=sid,
+            title=str(s.get("title") or sid),
+            instrumental=str(s.get("instrumental") or ""),
+            singer=str(s.get("singer") or ""),
+            lyrics=str(s.get("lyrics") or ""),
+        )
+
+    _song_cache_loaded_at = iso_utc_z()
+    return out
 
 
-def resolve_reference_audio_path(song_id: str) -> Path:
+def get_song_catalog(force_reload: bool = False) -> Dict[str, SongItem]:
+    global _song_cache
+    if force_reload or not _song_cache:
+        _song_cache = _load_song_catalog_from_server()
+    return _song_cache
+
+
+def get_song_or_raise(song_id: str) -> SongItem:
+    catalog = get_song_catalog()
+    if song_id not in catalog:
+        raise FileNotFoundError(f"song_id not found in catalog: {song_id} (catalog={list(catalog.keys())})")
+    return catalog[song_id]
+
+
+def resolve_song_asset_path(filename: str) -> Path:
     """
-    基本は songs カタログの singer を参照音源にする。
-    見つからなければ例外にして、summary で理由を返す。
+    サーバ側 songs フォルダから参照する。
     """
-    song = resolve_song(song_id)
-    if not song:
-        raise FileNotFoundError(f"song_id not found in catalog: {song_id}")
+    if not filename:
+        raise FileNotFoundError("asset filename is empty")
 
-    singer = song.get("singer")
-    if not singer:
-        raise FileNotFoundError(f"singer file not set for song_id: {song_id}")
+    p = (SERVER_SONGS_DIR / filename).resolve()
 
-    p = APP_AUDIO_DIR / singer
+    # songsフォルダ外へ抜けるのを防止
+    if SERVER_SONGS_DIR not in p.parents and p != SERVER_SONGS_DIR:
+        raise FileNotFoundError(f"invalid asset path: {filename}")
+
     if not p.exists():
-        raise FileNotFoundError(f"reference audio not found: {p}")
-
+        raise FileNotFoundError(f"asset not found: {p}")
     return p
 
 
-# ==================================================
-# ✅ Pitch extraction
-# ==================================================
-def _require_librosa():
-    if librosa is None:
-        raise RuntimeError("librosa is not installed. Run: pip install librosa numpy soundfile")
-
-
-def extract_pitch_track(audio_path: Path, sr: int = 44100, hop: int = 512):
-    """
-    librosa.pyin で F0 を抽出して、
-    {algo,sr,hop,track:[{t,f0_hz},...]} を返す
-    """
-    _require_librosa()
-
-    y, _sr = librosa.load(str(audio_path), sr=sr, mono=True)
-    if y is None or len(y) == 0:
-        return {"algo": "pyin", "sr": sr, "hop": hop, "track": []}
-
-    # pyin（歌声向け）
-    f0, voiced_flag, voiced_prob = librosa.pyin(
-        y,
-        fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("C7"),
-        sr=sr,
-        hop_length=hop,
-    )
-
-    # 時間軸
-    times = librosa.times_like(f0, sr=sr, hop_length=hop)
-
-    track = []
-    for t, hz, v in zip(times, f0, voiced_flag):
-        if hz is None or (isinstance(hz, float) and (math.isnan(hz) or hz <= 0)) or (v is False):
-            track.append({"t": float(t), "f0_hz": None})
-        else:
-            track.append({"t": float(t), "f0_hz": float(hz)})
-
-    return {"algo": "pyin", "sr": sr, "hop": hop, "track": track}
-
-
-def cents_diff(u_hz: float, r_hz: float) -> float:
-    return 1200.0 * math.log2(u_hz / r_hz)
-
-
-def make_summary_from_tracks(usr_pitch: dict, ref_pitch: dict, tol_cents: float = 40.0):
-    """
-    track を同フレームで突き合わせて、簡易統計を作る
-    """
-    ut = (usr_pitch or {}).get("track") or []
-    rt = (ref_pitch or {}).get("track") or []
-    n = min(len(ut), len(rt))
-    if n == 0:
-        return {
-            "verdict": "解析失敗",
-            "reason": "ピッチデータが生成できませんでした。",
-            "tips": ["もう一度短いフレーズで録音してください。"],
-            "tol_cents": float(tol_cents),
-        }
-
-    diffs = []
-    for i in range(n):
-        u = ut[i].get("f0_hz") if isinstance(ut[i], dict) else None
-        r = rt[i].get("f0_hz") if isinstance(rt[i], dict) else None
-        if u is None or r is None:
-            continue
-        try:
-            d = abs(cents_diff(float(u), float(r)))
-            diffs.append(d)
-        except Exception:
-            continue
-
-    if len(diffs) == 0:
-        return {
-            "verdict": "解析失敗",
-            "reason": "比較できる有声区間がありませんでした。",
-            "tips": ["はっきり声を出して録音してみてください。"],
-            "tol_cents": float(tol_cents),
-        }
-
-    diffs_np = np.array(diffs, dtype=np.float64)
-    mean_abs = float(np.mean(diffs_np))
-    within = float(np.mean(diffs_np <= tol_cents))
-
-    seconds = (n * (usr_pitch.get("hop") or 512)) / float(usr_pitch.get("sr") or 44100)
-
-    return {
-        "verdict": "解析完了",
-        "reason": "解析が完了しました。",
-        "tips": [
-            "短いフレーズで録音して、同じ高さをまっすぐ保つ練習をしてください。",
-            "歌手音源の一部を真似して、声の出だしをそろえてみてください。"
-        ],
-        "tol_cents": float(tol_cents),
-        "frames": int(n),
-        "seconds": float(seconds),
-        "mean_cents": mean_abs,
-        "percent_within_tol": within,
-    }
+@app.get("/api/admin/songs/reload")
+def admin_reload_songs():
+    try:
+        get_song_catalog(force_reload=True)
+        return jsonify({
+            "ok": True,
+            "message": "reloaded",
+            "songs_json": str(SERVER_SONGS_JSON),
+            "songs_dir": str(SERVER_SONGS_DIR),
+            "loaded_at": _song_cache_loaded_at,
+            "song_ids": list(_song_cache.keys()),
+        })
+    except Exception as e:
+        return json_error(
+            500,
+            "SONG_RELOAD_FAILED",
+            str(e),
+            songs_json=str(SERVER_SONGS_JSON),
+            songs_dir=str(SERVER_SONGS_DIR),
+        )
 
 
 # ==================================================
-# SQLite (history)
+# Session dir
 # ==================================================
-def get_db():
+def make_take_id() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+
+
+def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -> Path:
+    """
+    sessions/<song_id>/<user_id>/<take_id>/
+    take_id が無ければ最新のフォルダを使う（互換用）。
+    """
+    base = (SESSIONS_DIR / song_id / user_id).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+
+    if take_id:
+        d = (base / take_id).resolve()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    # take_id 未指定の場合は「最新っぽい」ものを使う（古いURL互換）
+    candidates = [p for p in base.iterdir() if p.is_dir()]
+    if not candidates:
+        tid = make_take_id()
+        d = (base / tid).resolve()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    candidates.sort(key=lambda p: p.name, reverse=True)
+    return candidates[0]
+
+
+def parse_session_id(session_id: str) -> Tuple[str, str, Optional[str]]:
+    """
+    session_id:
+      - 旧: "<song_id>/<user_id>"
+      - 新: "<song_id>/<user_id>/<take_id>"
+    """
+    parts = [p for p in session_id.split("/") if p]
+    if len(parts) >= 3:
+        return parts[0], parts[1], parts[2]
+    if len(parts) == 2:
+        return parts[0], parts[1], None
+    raise ValueError(f"invalid session_id: {session_id}")
+
+
+# ==================================================
+# DB (history)
+# ==================================================
+def get_db() -> sqlite3.Connection:
     if "db" not in g:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -315,16 +287,16 @@ def get_db():
 
 
 @app.teardown_appcontext
-def close_db(exception=None):
+def close_db(_err):
     db = g.pop("db", None)
     if db is not None:
         db.close()
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-
-    conn.execute(
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(DB_PATH)
+    db.execute(
         """
         CREATE TABLE IF NOT EXISTS history (
             id TEXT PRIMARY KEY,
@@ -332,8 +304,8 @@ def init_db():
             user_id TEXT NOT NULL,
             created_at TEXT NOT NULL,
 
-            comment_title TEXT NOT NULL,
-            comment_body  TEXT NOT NULL,
+            comment_title TEXT,
+            comment_body TEXT,
 
             score100 REAL,
             score100_strict REAL,
@@ -354,212 +326,404 @@ def init_db():
         )
         """
     )
-
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(history)").fetchall()]
-
-    def add_col(name: str, ddl: str):
-        if name not in cols:
-            conn.execute(ddl)
-
-    add_col("client_hash", "ALTER TABLE history ADD COLUMN client_hash TEXT")
-    add_col("comment_source", "ALTER TABLE history ADD COLUMN comment_source TEXT")
-    add_col("prompt_version", "ALTER TABLE history ADD COLUMN prompt_version TEXT")
-    add_col("model", "ALTER TABLE history ADD COLUMN model TEXT")
-    add_col("app_version", "ALTER TABLE history ADD COLUMN app_version TEXT")
-
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_history_user_client_hash ON history(user_id, client_hash)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_history_user_source_created ON history(user_id, comment_source, created_at DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_history_user_prompt_created ON history(user_id, prompt_version, created_at DESC)"
-    )
-
-    conn.commit()
-    conn.close()
+    db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_hash ON history(user_id, client_hash)")
+    db.commit()
+    db.close()
 
 
 # ==================================================
-# Health
+# OpenAI helpers
 # ==================================================
-@app.get("/health")
-def health():
-    return jsonify({"ok": True, "service": "singing-backend"})
+def require_openai_key_or_error():
+    if openai_client is None:
+        raise RuntimeError("OPENAI_API_KEY is not set or OpenAI client failed to initialize.")
 
 
-# ==================================================
-# Existing: /upload (kept for compatibility)
-# ==================================================
-@app.post("/upload")
-def upload():
-    if "audio" not in request.files:
-        return jsonify({"ok": False, "error": "no 'audio' field"}), 400
-
-    f = request.files["audio"]
-    if not f.filename:
-        return jsonify({"ok": False, "error": "empty filename"}), 400
-
-    ext = (Path(f.filename).suffix or ".m4a").lower()
-    file_id = str(uuid.uuid4())
-    out_path = UPLOAD_DIR / f"{file_id}{ext}"
-    f.save(out_path)
-
-    return jsonify(
-        {
-            "ok": True,
-            "file_id": file_id,
-            "saved_path": str(out_path),
-            "note": "保存のみ。解析は別エンドポイントで行う想定。",
-        }
-    )
-
-
-# ==================================================
-# ✅ voice upload
-# POST /api/voice/<user_id>
-# multipart: file or audio
-# query: ?song_id=orpheus
-# ==================================================
-@app.post("/api/voice/<user_id>")
-def upload_voice(user_id: str):
+def _normalize_ai_comment(text: str) -> Tuple[str, str]:
+    """
+    AIがJSON以外を返しても最低限表示できるように救済。
+    """
     try:
-        # ✅ song_id はクエリ or フォームから受ける（どちらでもOK）
-        song_id = (request.args.get("song_id") or request.form.get("song_id") or "").strip()
-        if not song_id:
-            return json_error(400, "BAD_REQUEST", "song_id is required (query or form)")
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            title = str(obj.get("title") or "AIコメント")
+            body = str(obj.get("body") or "").strip()
+            if not body:
+                body = "（本文が空でした）"
+            return title, body
+    except Exception:
+        pass
 
-        f = request.files.get("file") or request.files.get("audio")
-        if f is None:
-            return json_error(400, "BAD_REQUEST", "file is required (multipart field name: file or audio)")
-        if not f.filename:
-            return json_error(400, "BAD_REQUEST", "empty filename")
+    # fallback
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return "AIコメント", "（本文が空でした）"
+    title = lines[0][:20]
+    body = "\n".join(lines[1:6]) if len(lines) > 1 else "（本文が空でした）"
+    return title, body
 
-        ext = (Path(f.filename).suffix or ".wav").lower()
-        if ext not in [".wav", ".m4a", ".caf", ".aac"]:
-            return json_error(400, "BAD_REQUEST", f"unsupported extension: {ext}")
 
-        # ✅ 録音ごとに take_id を作る（上書きしない）
-        take_id = make_take_id()
+# ==================================================
+# Audio decode + FFT pitch
+# ==================================================
+def _which(cmd: str) -> Optional[str]:
+    from shutil import which
+    return which(cmd)
 
-        sess_dir = get_session_dir(song_id, user_id, take_id)
-        sess_dir.mkdir(parents=True, exist_ok=True)
 
-        in_audio_path = sess_dir / f"input{ext}"
-        f.save(in_audio_path)
+def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
+    """
+    m4a 等を ffmpeg で wav(PCM16) に変換して一時ファイルとして返す。
+    ffmpeg が無い場合は例外。
+    """
+    ffmpeg = _which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            "ffmpeg が見つかりません。m4a を解析するには ffmpeg が必要です。"
+            " 参照音源を wav にするか、ffmpeg を入れてください。"
+        )
 
-        # ✅ 必ず解析まで作る（CompareViewでスコア/グラフを出すため）
-        _run_analysis_and_write_files(song_id, user_id, take_id, sess_dir, in_audio_path)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    tmp_path = Path(tmp.name)
+    tmp.close()
 
-        session_id = f"{song_id}/{user_id}/{take_id}"
+    # -vn: no video, -ac 1 mono, -ar 44100
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(src_path),
+        "-vn",
+        "-ac", "1",
+        "-ar", "44100",
+        "-f", "wav",
+        str(tmp_path),
+    ]
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"ffmpeg 変換に失敗しました: {p.stderr[:400]}")
+    return tmp_path
 
-        return jsonify({
+
+def _read_wav_mono_float(path: Path) -> Tuple[np.ndarray, int]:
+    """
+    wav を読み、mono float32(-1..1) と sr を返す（標準 wave のみ）。
+    """
+    with wave.open(str(path), "rb") as wf:
+        nch = wf.getnchannels()
+        sr = wf.getframerate()
+        sampwidth = wf.getsampwidth()
+        nframes = wf.getnframes()
+        raw = wf.readframes(nframes)
+
+    if sampwidth == 2:
+        x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sampwidth == 4:
+        x = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+    else:
+        raise RuntimeError(f"unsupported wav sample width: {sampwidth}")
+
+    if nch >= 2:
+        x = x.reshape(-1, nch).mean(axis=1)
+
+    return x, int(sr)
+
+
+def load_audio_mono_float(path: Path) -> Tuple[np.ndarray, int]:
+    """
+    wav は標準で読む。m4a 等は ffmpeg があれば wav に変換して読む。
+    """
+    ext = path.suffix.lower()
+    if ext == ".wav":
+        return _read_wav_mono_float(path)
+
+    tmp_wav = _decode_to_wav_via_ffmpeg(path)
+    try:
+        return _read_wav_mono_float(tmp_wav)
+    finally:
+        try:
+            tmp_wav.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _parabolic_interpolation(y0: float, y1: float, y2: float) -> float:
+    """
+    3点の放物線補間でピーク位置の微調整を返す（-0.5..0.5程度）。
+    """
+    denom = (y0 - 2.0 * y1 + y2)
+    if abs(denom) < 1e-12:
+        return 0.0
+    return 0.5 * (y0 - y2) / denom
+
+
+def extract_pitch_track_fft(
+    x: np.ndarray,
+    sr: int,
+    hop: int = PITCH_HOP,
+    fmin: float = PITCH_FMIN,
+    fmax: float = PITCH_FMAX,
+    energy_th: float = PITCH_ENERGY_TH,
+    max_seconds: float = PITCH_MAX_SECONDS,
+) -> List[Dict[str, Any]]:
+    """
+    超簡易 pitch 抽出：
+    - hop ごとに frame を切る（frame_len = 2*hop）
+    - ハミング窓 + rfft
+    - fmin..fmax の最大ピークを f0 とする
+    - 無声音は f0_hz = null
+    返り値は [{"t": sec, "f0_hz": float|None}, ...]
+    """
+    if x.size == 0 or sr <= 0:
+        return []
+
+    max_n = int(sr * max_seconds)
+    if x.size > max_n:
+        x = x[:max_n]
+
+    frame_len = int(hop * 2)
+    if frame_len < 256:
+        frame_len = 256
+
+    win = np.hamming(frame_len).astype(np.float32)
+
+    freqs = np.fft.rfftfreq(frame_len, d=1.0 / sr)
+
+    band = (freqs >= fmin) & (freqs <= fmax)
+    band_idx = np.where(band)[0]
+    if band_idx.size == 0:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    n = x.size
+
+    # 末尾まで拾うために range の上限を n-frame_len + 1 にする
+    for start in range(0, max(0, n - frame_len + 1), hop):
+        frame = x[start:start + frame_len]
+        if frame.size != frame_len:
+            break
+
+        rms = float(np.sqrt(np.mean(frame * frame)))
+        t = float(start) / float(sr)
+
+        if rms < energy_th:
+            out.append({"t": t, "f0_hz": None})
+            continue
+
+        spec = np.fft.rfft(frame * win)
+        mag = np.abs(spec).astype(np.float32)
+
+        mag_band = mag[band]
+        if mag_band.size == 0:
+            out.append({"t": t, "f0_hz": None})
+            continue
+
+        k_rel = int(np.argmax(mag_band))
+        k = int(band_idx[k_rel])
+
+        if 1 <= k < (mag.size - 1):
+            d = _parabolic_interpolation(float(mag[k - 1]), float(mag[k]), float(mag[k + 1]))
+        else:
+            d = 0.0
+
+        f0 = float((k + d) * (sr / frame_len))
+
+        if not (fmin <= f0 <= fmax) or math.isnan(f0) or math.isinf(f0):
+            out.append({"t": t, "f0_hz": None})
+        else:
+            out.append({"t": t, "f0_hz": f0})
+
+    return out
+
+
+# ref pitch cache（曲ごとに一度だけ作る）
+_ref_pitch_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
+    x, sr = load_audio_mono_float(path)
+    track = extract_pitch_track_fft(x, sr, hop=PITCH_HOP)
+    return {
+        "algo": "fft_peak",
+        "sr": int(sr),
+        "hop": int(PITCH_HOP),
+        "track": track,
+    }
+
+
+def get_ref_pitch_for_song(song: SongItem) -> Dict[str, Any]:
+    """
+    singer 音源から ref pitch を作る（キャッシュ）。
+    """
+    if song.id in _ref_pitch_cache:
+        return _ref_pitch_cache[song.id]
+
+    singer_path = resolve_song_asset_path(song.singer)
+    ref_pitch = build_pitch_track_from_file(singer_path)
+
+    _ref_pitch_cache[song.id] = ref_pitch
+    return ref_pitch
+
+
+# ==================================================
+# Core analysis (FFT version)
+# ==================================================
+def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dict[str, Any]:
+    """
+    FFTで usr/ref の pitch track を作って返す（最小構成）。
+    events はまだ無し。
+    """
+    try:
+        song = get_song_or_raise(song_id)
+
+        # existence check
+        _ = resolve_song_asset_path(song.instrumental)
+        _ = resolve_song_asset_path(song.singer)
+        _ = resolve_song_asset_path(song.lyrics)
+
+        usr_pitch = build_pitch_track_from_file(wav_path)
+        ref_pitch = get_ref_pitch_for_song(song)
+
+        usr_n = safe_len(usr_pitch.get("track")) or 0
+        ref_n = safe_len(ref_pitch.get("track")) or 0
+
+        if usr_n == 0 or ref_n == 0:
+            verdict = "解析失敗"
+            reason = "音程データが作れませんでした（無音、または参照音源の読み取りに失敗）"
+            tips = [
+                "短いフレーズで録音してみてください。",
+                "参照音源が再生できる形式か確認してください（m4aの場合はffmpegが必要なことがあります）。",
+            ]
+        else:
+            verdict = "解析完了"
+            reason = "音程データを作成しました。"
+            tips = [
+                "ズレが大きい区間を短く区切って繰り返し練習してください。",
+                "出だしの音を狙ってから声を出すと安定しやすいです。",
+            ]
+
+        return {
             "ok": True,
-            "session_id": session_id,
             "song_id": song_id,
             "user_id": user_id,
             "take_id": take_id,
-            "saved_path": str(in_audio_path),
-            "message": "uploaded_and_analyzed"
+            "session_id": f"{song_id}/{user_id}/{take_id}",
+            "usr_pitch": usr_pitch,
+            "ref_pitch": ref_pitch,
+            "events": [],
+            "summary": {
+                "verdict": verdict,
+                "reason": reason,
+                "tips": tips,
+                "tol_cents": 40.0,
+            },
+            "meta": {
+                "paths": {},
+                "counts": {"events": 0, "ref_track": ref_n, "usr_track": usr_n},
+            },
+        }
+
+    except Exception as e:
+        return {
+            "ok": True,
+            "song_id": song_id,
+            "user_id": user_id,
+            "take_id": take_id,
+            "session_id": f"{song_id}/{user_id}/{take_id}",
+            "usr_pitch": {"algo": "none", "sr": 44100, "hop": PITCH_HOP, "track": []},
+            "ref_pitch": {"algo": "none", "sr": None, "hop": None, "track": []},
+            "events": [],
+            "summary": {
+                "verdict": "解析失敗",
+                "reason": f"解析中にエラー: {e}",
+                "tips": [
+                    "song_id が正しいか確認してください。",
+                    "参照音源の配置とファイル形式を確認してください（m4aはffmpegが必要）。",
+                ],
+                "tol_cents": 40.0,
+            },
+            "meta": {
+                "paths": {},
+                "counts": {"events": 0, "ref_track": 0, "usr_track": 0},
+            },
+        }
+
+
+# ==================================================
+# API: upload voice
+# POST /api/voice/<user_id>?song_id=xxx
+# ==================================================
+@app.post("/api/voice/<user_id>")
+def upload_voice(user_id: str):
+    """
+    multipart form-data:
+      - file: wav
+    query:
+      - song_id (required ideally)
+    """
+    try:
+        song_id = (request.args.get("song_id") or "").strip()
+        if not song_id:
+            song_id = "orphans"
+
+        up = request.files.get("file")
+        if up is None:
+            return json_error(400, "NO_FILE", "file is required")
+
+        take_id = make_take_id()
+        sess_dir = get_session_dir(song_id, user_id, take_id)
+        wav_path = sess_dir / "input.wav"
+
+        up.save(wav_path)
+
+        analysis = analyze_fft(song_id, user_id, take_id, wav_path)
+
+        (sess_dir / "usr_pitch.json").write_text(json.dumps(analysis.get("usr_pitch"), ensure_ascii=False), encoding="utf-8")
+        (sess_dir / "ref_pitch.json").write_text(json.dumps(analysis.get("ref_pitch"), ensure_ascii=False), encoding="utf-8")
+        (sess_dir / "events.json").write_text(json.dumps(analysis.get("events"), ensure_ascii=False), encoding="utf-8")
+        (sess_dir / "summary.json").write_text(json.dumps(analysis.get("summary"), ensure_ascii=False), encoding="utf-8")
+
+        return jsonify({
+            "ok": True,
+            "message": "uploaded_and_analyzed",
+            "saved_path": str(wav_path),
+            "session_id": analysis.get("session_id"),
+            "song_id": song_id,
+            "user_id": user_id,
+            "take_id": take_id,
         })
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-def _run_analysis_and_write_files(song_id: str, user_id: str, take_id: str, sess_dir: Path, in_audio_path: Path):
-    """
-    usr_pitch/ref_pitch/events/summary を作って session dir に保存
-    """
-    # 参照音源（singer）
-    try:
-        ref_audio_path = resolve_reference_audio_path(song_id)
-    except Exception as e:
-        # 参照が無いと比較できないので、最低限のJSONは作って理由を返す
-        usr_pitch = {"algo": "none", "sr": 44100, "hop": 512, "track": []}
-        ref_pitch = {"algo": "none", "sr": None, "hop": None, "track": []}
-        events = []
-        summary = {
-            "verdict": "解析失敗",
-            "reason": f"参照音源が見つかりません: {e}",
-            "tips": ["song_id が正しいか確認してください。"],
-            "tol_cents": 40.0
-        }
-        write_json(sess_dir / "usr_pitch.json", usr_pitch)
-        write_json(sess_dir / "ref_pitch.json", ref_pitch)
-        write_json(sess_dir / "events.json", events)
-        write_json(sess_dir / "summary.json", summary)
-        return
-
-    # pitch 抽出
-    usr_pitch = extract_pitch_track(in_audio_path, sr=44100, hop=512)
-    ref_pitch = extract_pitch_track(ref_audio_path, sr=44100, hop=512)
-
-    # events は今は空（将来ズレ区間検出を入れる）
-    events = []
-
-    summary = make_summary_from_tracks(usr_pitch, ref_pitch, tol_cents=40.0)
-
-    write_json(sess_dir / "usr_pitch.json", usr_pitch)
-    write_json(sess_dir / "ref_pitch.json", ref_pitch)
-    write_json(sess_dir / "events.json", events)
-    write_json(sess_dir / "summary.json", summary)
-
-
 # ==================================================
-# Analysis API
-# GET /api/analysis/<path:session_id>
+# API: analysis
+# GET /api/analysis/<session_id>
 # ==================================================
 @app.get("/api/analysis/<path:session_id>")
 def get_analysis(session_id: str):
     try:
         song_id, user_id, take_id = parse_session_id(session_id)
-
-        # take_id が無い旧形式が来たら、最新 take を探す（互換）
-        if take_id is None:
-            base = get_session_dir(song_id, user_id, None)
-            if not base.exists():
-                raise FileNotFoundError(f"session base not found: {base}")
-            takes = sorted([p for p in base.iterdir() if p.is_dir()])
-            if not takes:
-                raise FileNotFoundError(f"no takes found: {base}")
-            sess_dir = takes[-1]
-        else:
-            sess_dir = get_session_dir(song_id, user_id, take_id)
+        sess_dir = get_session_dir(song_id, user_id, take_id)
 
         ref_pitch_path = sess_dir / "ref_pitch.json"
         usr_pitch_path = sess_dir / "usr_pitch.json"
         events_path = sess_dir / "events.json"
         summary_path = sess_dir / "summary.json"
 
-        # 無ければ解析し直す（デバッグが楽）
-        if not (ref_pitch_path.exists() and usr_pitch_path.exists() and events_path.exists() and summary_path.exists()):
-            input_candidates = list(sess_dir.glob("input.*"))
-            if not input_candidates:
-                raise FileNotFoundError(f"input audio not found in session dir: {sess_dir}")
-            _run_analysis_and_write_files(song_id, user_id, take_id or "unknown", sess_dir, input_candidates[0])
-
         ref_pitch = read_json_or_error(ref_pitch_path, "ref_pitch")
         usr_pitch = read_json_or_error(usr_pitch_path, "usr_pitch")
         events = read_json_or_error(events_path, "events")
         summary = read_json_or_error(summary_path, "summary")
 
-        # 返す session_id は必ず 3階層にする
-        resolved_take = sess_dir.name
-        resolved_session_id = f"{song_id}/{user_id}/{resolved_take}"
-
         return jsonify({
             "ok": True,
-            "session_id": resolved_session_id,
+            "session_id": session_id,
             "song_id": song_id,
             "user_id": user_id,
+            "events": events,
             "ref_pitch": ref_pitch,
             "usr_pitch": usr_pitch,
-            "events": events,
             "summary": summary,
             "meta": {
                 "paths": {
@@ -579,82 +743,83 @@ def get_analysis(session_id: str):
     except FileNotFoundError as e:
         return json_error(404, "FILE_NOT_FOUND", str(e))
     except ValueError as e:
-        return json_error(500, "INVALID_SESSION", str(e))
+        return json_error(500, "INVALID_JSON", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 # ==================================================
-# AI comment
-# POST /api/comment/<path:session_id>
+# AI comment (core + compat routes)
 # ==================================================
-@app.post("/api/comment/<path:session_id>")
-def ai_comment(session_id: str):
+def _ai_comment_core(song_id: str, user_id: str, take_id: Optional[str]):
+    """
+    /api/comment の本体処理を共通化
+    - take_id があればそのセッション
+    - 無ければ最新（互換）
+    """
+    require_openai_key_or_error()
+
+    sess_dir = get_session_dir(song_id, user_id, take_id)
+
+    events_path = sess_dir / "events.json"
+    summary_path = sess_dir / "summary.json"
+
+    events: List[Dict[str, Any]] = []
+    summary: Dict[str, Any] = {}
+
     try:
-        require_openai_key_or_error()
-
-        song_id, user_id, take_id = parse_session_id(session_id)
-        if take_id is None:
-            return json_error(400, "BAD_REQUEST", "session_id must include take_id (song/user/take)")
-
-        sess_dir = get_session_dir(song_id, user_id, take_id)
-        events_path = sess_dir / "events.json"
-        summary_path = sess_dir / "summary.json"
-
+        if events_path.exists():
+            events = read_json_or_error(events_path, "events")
+        if summary_path.exists():
+            summary = read_json_or_error(summary_path, "summary")
+    except Exception:
         events = []
         summary = {}
-        try:
-            if events_path.exists():
-                events = read_json_or_error(events_path, "events")
-            if summary_path.exists():
-                summary = read_json_or_error(summary_path, "summary")
-        except Exception:
-            events = []
-            summary = {}
 
-        payload = request.get_json(silent=True) or {}
-        stats = payload.get("stats", {}) or {}
+    payload = request.get_json(silent=True) or {}
+    stats = payload.get("stats", {}) or {}
 
-        tol_cents = stats.get("tolCents", summary.get("tol_cents", 40.0))
-        percent_within = stats.get("percentWithinTol")
-        mean_abs = stats.get("meanAbsCents")
-        sample_count = stats.get("sampleCount")
+    tol_cents = stats.get("tolCents", summary.get("tol_cents", 40.0))
+    percent_within = stats.get("percentWithinTol")
+    mean_abs = stats.get("meanAbsCents")
+    sample_count = stats.get("sampleCount")
 
-        score_strict = stats.get("scoreStrict")
-        score_oct = stats.get("scoreOctaveInvariant")
-        octave_now = stats.get("octaveInvariantNow")
+    score_strict = stats.get("scoreStrict")
+    score_oct = stats.get("scoreOctaveInvariant")
+    octave_now = stats.get("octaveInvariantNow")
 
-        event_head = []
-        if isinstance(events, list):
-            for e in events[:10]:
-                if isinstance(e, dict):
-                    event_head.append({
-                        "start": e.get("start"),
-                        "end": e.get("end"),
-                        "type": e.get("type"),
-                        "avg_cents": e.get("avg_cents"),
-                        "max_cents": e.get("max_cents"),
-                    })
+    event_head = []
+    if isinstance(events, list):
+        for e in events[:10]:
+            if isinstance(e, dict):
+                event_head.append({
+                    "start": e.get("start"),
+                    "end": e.get("end"),
+                    "type": e.get("type"),
+                    "avg_cents": e.get("avg_cents"),
+                    "max_cents": e.get("max_cents"),
+                })
 
-        model_input = {
-            "song_id": song_id,
-            "user_id": user_id,
-            "tolCents": tol_cents,
-            "percentWithinTol": percent_within,
-            "meanAbsCents": mean_abs,
-            "sampleCount": sample_count,
-            "scoreStrict": score_strict,
-            "scoreOctaveInvariant": score_oct,
-            "octaveInvariantNow": octave_now,
-            "summary": {
-                "verdict": summary.get("verdict"),
-                "reason": summary.get("reason"),
-                "tips": summary.get("tips"),
-            },
-            "events_head": event_head,
-        }
+    model_input = {
+        "song_id": song_id,
+        "user_id": user_id,
+        "take_id": take_id,
+        "tolCents": tol_cents,
+        "percentWithinTol": percent_within,
+        "meanAbsCents": mean_abs,
+        "sampleCount": sample_count,
+        "scoreStrict": score_strict,
+        "scoreOctaveInvariant": score_oct,
+        "octaveInvariantNow": octave_now,
+        "summary": {
+            "verdict": summary.get("verdict"),
+            "reason": summary.get("reason"),
+            "tips": summary.get("tips"),
+        },
+        "events_head": event_head,
+    }
 
-        system = """
+    system = """
 あなたはカラオケ初心者向けの歌のコーチです。専門用語は使いません。
 
 出力は必ずJSONのみ：
@@ -669,27 +834,56 @@ def ai_comment(session_id: str):
 - 最後に一言だけ励ます
 """.strip()
 
-        user = "次のJSONを読んでコメントを作成してください。\n" + json.dumps(model_input, ensure_ascii=False)
+    user = "次のJSONを読んでコメントを作成してください。\n" + json.dumps(model_input, ensure_ascii=False)
 
-        resp = openai_client.responses.create(
-            model=AI_MODEL_NAME,
-            input=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
+    resp = openai_client.responses.create(
+        model=AI_MODEL_NAME,
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    )
 
-        llm_text = (getattr(resp, "output_text", "") or "").strip()
-        title, body = _normalize_ai_comment(llm_text)
+    llm_text = (getattr(resp, "output_text", "") or "").strip()
+    title, body = _normalize_ai_comment(llm_text)
 
-        return jsonify({
-            "ok": True,
-            "title": title,
-            "body": body,
-            "model": AI_MODEL_NAME,
-            "prompt_version": PROMPT_VERSION_DEFAULT
-        })
+    return jsonify({
+        "ok": True,
+        "title": title,
+        "body": body,
+        "model": AI_MODEL_NAME,
+        "prompt_version": PROMPT_VERSION_DEFAULT,
+    })
 
+
+# 旧: /api/comment/<song_id>/<user_id> （最新セッション）
+@app.post("/api/comment/<song_id>/<user_id>")
+def ai_comment(song_id: str, user_id: str):
+    try:
+        return _ai_comment_core(song_id, user_id, take_id=None)
+    except RuntimeError as e:
+        return json_error(500, "OPENAI_KEY_MISSING", str(e))
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# 新: /api/comment/<song_id>/<user_id>/<take_id> （指定セッション）
+@app.post("/api/comment/<song_id>/<user_id>/<take_id>")
+def ai_comment_with_take(song_id: str, user_id: str, take_id: str):
+    try:
+        return _ai_comment_core(song_id, user_id, take_id=take_id)
+    except RuntimeError as e:
+        return json_error(500, "OPENAI_KEY_MISSING", str(e))
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+
+# 保険: /api/comment/<path:session_id> （orpheus/user01/xxxx をそのまま渡す）
+@app.post("/api/comment/<path:session_id>")
+def ai_comment_by_session(session_id: str):
+    try:
+        song_id, user_id, take_id = parse_session_id(session_id)
+        return _ai_comment_core(song_id, user_id, take_id=take_id)
     except RuntimeError as e:
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
     except Exception as e:
@@ -698,7 +892,6 @@ def ai_comment(session_id: str):
 
 # ==================================================
 # History append/list/delete
-# （ここは変更なし：song_id/user_id 単位で履歴管理が自然）
 # ==================================================
 @app.post("/api/history/<song_id>/<user_id>/append")
 def history_append(song_id: str, user_id: str):
@@ -712,7 +905,7 @@ def history_append(song_id: str, user_id: str):
             return payload.get(snake)
 
         comment_title = payload.get("commentTitle") or payload.get("comment_title") or "AIコメント"
-        comment_body  = payload.get("commentBody")  or payload.get("comment_body")  or ""
+        comment_body = payload.get("commentBody") or payload.get("comment_body") or ""
 
         if not str(comment_body).strip():
             return jsonify({"ok": False, "item": None, "message": "commentBody is empty"}), 400
@@ -759,15 +952,15 @@ def history_append(song_id: str, user_id: str):
                 1 if bool(octave_now) else 0,
                 tol_cents, percent_within, mean_abs, sample_count,
                 client_hash,
-                comment_source, prompt_version, model_name, app_version
-            )
+                comment_source, prompt_version, model_name, app_version,
+            ),
         )
         db.commit()
 
         if (cur.rowcount or 0) == 0:
             row = db.execute(
                 "SELECT * FROM history WHERE user_id = ? AND client_hash = ? ORDER BY created_at DESC LIMIT 1",
-                (user_id, client_hash)
+                (user_id, client_hash),
             ).fetchone()
 
             if row is None:
@@ -787,8 +980,8 @@ def history_list(user_id: str):
     try:
         source = request.args.get("source")
         prompt = request.args.get("prompt")
-        model  = request.args.get("model")
-        limit  = request.args.get("limit", type=int)
+        model = request.args.get("model")
+        limit = request.args.get("limit", type=int)
         offset = request.args.get("offset", type=int)
 
         if limit is None:
@@ -862,10 +1055,7 @@ def history_list(user_id: str):
 def history_delete(user_id: str, history_id: str):
     try:
         db = get_db()
-        cur = db.execute(
-            "DELETE FROM history WHERE user_id = ? AND id = ?",
-            (user_id, history_id)
-        )
+        cur = db.execute("DELETE FROM history WHERE user_id = ? AND id = ?", (user_id, history_id))
         db.commit()
 
         deleted = (cur.rowcount or 0) > 0
@@ -880,4 +1070,16 @@ def history_delete(user_id: str, history_id: str):
 # ==================================================
 if __name__ == "__main__":
     init_db()
+    try:
+        get_song_catalog(force_reload=True)
+        print("✅ SERVER_SONGS_DIR =", SERVER_SONGS_DIR)
+        print("✅ SERVER_SONGS_JSON =", SERVER_SONGS_JSON)
+        print("✅ song_ids =", list(_song_cache.keys()))
+        print("✅ FFT pitch: hop =", PITCH_HOP, "fmin =", PITCH_FMIN, "fmax =", PITCH_FMAX)
+        print("✅ ffmpeg =", _which("ffmpeg"))
+    except Exception as e:
+        print("⚠️ song catalog load failed:", e)
+        print("   SERVER_SONGS_DIR =", SERVER_SONGS_DIR)
+        print("   SERVER_SONGS_JSON =", SERVER_SONGS_JSON)
+
     app.run(host="0.0.0.0", port=5000, debug=True)

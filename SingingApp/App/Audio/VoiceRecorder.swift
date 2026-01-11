@@ -49,6 +49,13 @@ final class VoiceRecorder: ObservableObject {
         isRecording = false
     }
     
+    /// ✅ 端末に残したくないので、アップロード後に消す用
+    func deleteRecordedFile() {
+        guard let url = recordedFileURL else { return }
+        try? FileManager.default.removeItem(at: url)
+        recordedFileURL = nil
+    }
+    
     private static func makeNewRecordingURL() -> URL {
         let dir = FileManager.default.temporaryDirectory
         let formatter = DateFormatter()

@@ -37,7 +37,7 @@ final class CompareViewModel: ObservableObject {
     @Published private(set) var didGenerateAIComment = false
     @Published private(set) var isHistorySaved = false
     @Published private(set) var sampleCount: Int = 0
-
+    
     private var lastSessionId: String?
     
     func load(sessionId: String) {
@@ -71,6 +71,26 @@ final class CompareViewModel: ObservableObject {
     
     func rebuildCaches() {
         guard let a = analysis else { return }
+        
+        // ✅ 追加：解析準備中などで track が空のとき、PitchMath に渡さず安全にUIを保つ
+        let usrCount = a.usrPitch?.track?.count ?? 0
+        let refCount = a.refPitch?.track?.count ?? 0
+        if usrCount == 0 || refCount == 0 {
+            self.overlayPoints = []
+            self.errorPoints = []
+            
+            self.score100 = 0
+            self.percentWithinTol = 0
+            self.meanAbsCents = 0
+            self.sampleCount = 0
+            
+            self.score100Strict = 0
+            self.score100OctaveInvariant = 0
+            
+            self.commentTitle = "コメント"
+            self.commentBody = a.summary?.reason ?? "解析準備中です。しばらくしてから再読み込みしてください。"
+            return
+        }
         
         let tol = a.summary?.tolCents ?? 40.0
         let density = self.density
@@ -113,7 +133,7 @@ final class CompareViewModel: ObservableObject {
                 self.percentWithinTol = active.stats.percentWithinTol
                 self.meanAbsCents = active.stats.meanAbsCents
                 self.sampleCount = active.stats.sampleCount
-
+                
                 self.score100Strict = strictScore100
                 self.score100OctaveInvariant = octaveScore100
                 
@@ -232,7 +252,7 @@ final class CompareViewModel: ObservableObject {
         print("meanAbsCents:", meanAbsCents)
         print("sampleCount:", sampleCount)
         print("==========================")
-
+        
         Task {
             do {
                 let res = try await AnalysisAPI.shared.appendHistory(sessionId: sessionId, reqBody: req)
@@ -249,7 +269,7 @@ final class CompareViewModel: ObservableObject {
             }
         }
     }
-
+    
     
     // ズレグラフの表示レンジ
     func errorYDomain(tol: Double) -> ClosedRange<Double> {

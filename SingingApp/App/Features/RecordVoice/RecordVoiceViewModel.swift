@@ -10,7 +10,7 @@ final class RecordVoiceViewModel: ObservableObject {
     @Published var isUploading: Bool = false
     @Published var errorMessage: String?
     
-    // 遷移用
+    // 遷移用（CompareViewに渡すsessionId）
     @Published var nextSessionId: String?
     
     private let api: AnalysisAPI
@@ -20,10 +20,11 @@ final class RecordVoiceViewModel: ObservableObject {
         self.api = api
     }
     
-    func uploadIfPossible(fileURL: URL?) async {
+    // 成功/失敗を Bool で返す（VMでは削除しない）
+    func uploadOnlyReturnBool(fileURL: URL?, songId: String) async -> Bool {
         guard let fileURL else {
             errorMessage = "録音ファイルがありません"
-            return
+            return false
         }
         
         isUploading = true
@@ -31,10 +32,20 @@ final class RecordVoiceViewModel: ObservableObject {
         defer { isUploading = false }
         
         do {
-            let res = try await api.uploadUserVoice(userId: userId, wavFileURL: fileURL)
+            let res = try await api.uploadUserVoice(userId: userId, songId: songId, wavFileURL: fileURL)
             nextSessionId = res.session_id
+            return true
         } catch {
             errorMessage = "アップロードに失敗: \(error.localizedDescription)"
+            return false
         }
+    }
+    
+    func resetError() {
+        errorMessage = nil
+    }
+    
+    func resetNavigation() {
+        nextSessionId = nil
     }
 }

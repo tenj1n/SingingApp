@@ -17,10 +17,6 @@
 		04771BA12EF808A900E70CDB /* songs.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA02EF808A900E70CDB /* songs.json */; };
 		04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA42EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a */; };
 		04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA82EF809EC00E70CDB /* orpheus_lyrics.json */; };
-		0477B11E2EEAF2E4006C6113 /* compare.png in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11D2EEAF2E4006C6113 /* compare.png */; };
-		0477B1222EEAFAFA006C6113 /* summary.txt in Resources */ = {isa = PBXBuildFile; fileRef = 0477B1212EEAFAFA006C6113 /* summary.txt */; };
-		0477B1232EEAFAFA006C6113 /* events.json in Resources */ = {isa = PBXBuildFile; fileRef = 0477B11F2EEAFAFA006C6113 /* events.json */; };
-		0477B1242EEAFAFA006C6113 /* summary.json in Resources */ = {isa = PBXBuildFile; fileRef = 0477B1202EEAFAFA006C6113 /* summary.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -221,14 +217,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0477B1222EEAFAFA006C6113 /* summary.txt in Resources */,
-				0477B1232EEAFAFA006C6113 /* events.json in Resources */,
 				04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */,
 				04771B9F2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a in Resources */,
-				0477B1242EEAFAFA006C6113 /* summary.json in Resources */,
 				04771BA12EF808A900E70CDB /* songs.json in Resources */,
 				04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */,
-				0477B11E2EEAF2E4006C6113 /* compare.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -377,9 +369,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5UXQC4UCTV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SingingTrainer/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "歌声を録音して分析するためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -406,9 +400,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5UXQC4UCTV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SingingTrainer/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "歌声を録音して分析するためにマイクを使用します";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

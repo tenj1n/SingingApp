@@ -112,9 +112,28 @@ struct CompareView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            if let meta = a.meta?.paths {
-                if let ref = meta.refPitch { Text("参照ピッチ：\(ref)").font(.caption2).foregroundStyle(.secondary) }
-                if let usr = meta.usrPitch { Text("自分ピッチ：\(usr)").font(.caption2).foregroundStyle(.secondary) }
+            // ✅ 差し替え：a.meta?.paths は辞書なので ["ref_pitch"] などで参照する
+            if let paths = a.meta?.paths {
+                if let ref = paths["ref_pitch"] {
+                    Text("参照ピッチ：\(ref)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let usr = paths["usr_pitch"] {
+                    Text("自分ピッチ：\(usr)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let events = paths["events"] {
+                    Text("イベント：\(events)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let summary = paths["summary"] {
+                    Text("サマリー：\(summary)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(12)

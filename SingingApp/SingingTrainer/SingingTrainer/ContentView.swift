@@ -26,7 +26,7 @@ struct ContentView: View {
             CompareView()
         }
         .onAppear {
-            // ★ここを今の歌詞ファイル名に合わせる
+            // ここを今の歌詞ファイル名に合わせる
             store.load(fileName: "orpheus_lyrics.json")
         }
     }

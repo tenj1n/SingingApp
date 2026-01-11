@@ -78,10 +78,22 @@ enum PitchMath {
         for i in stride(from: 0, to: n, by: step) {
             let ut = usrTrack[i].t
             let rt = refTrack[i].t
-            let t = min(ut, rt)
+            
+            // ✅ Optional(Double?) 対応：t を安全に決める
+            let t: Double
+            if let ut, let rt {
+                t = min(ut, rt)
+            } else if let ut {
+                t = ut
+            } else if let rt {
+                t = rt
+            } else {
+                continue
+            }
             
             guard let uHz = usrTrack[i].f0Hz, uHz > 0,
                   let rHz = refTrack[i].f0Hz, rHz > 0 else { continue }
+
             
             var uMidi = hzToMidi(uHz)
             let rMidi = hzToMidi(rHz)

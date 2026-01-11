@@ -2,8 +2,9 @@ import Foundation
 
 // MARK: - Pitch
 
-struct PitchPoint: Codable {
-    let t: Double
+/// サーバの pitch track は t が null の可能性もゼロではないので Optional に寄せる（安全側）
+struct PitchPoint: Decodable {
+    let t: Double?
     let f0Hz: Double?
     
     enum CodingKeys: String, CodingKey {
@@ -12,14 +13,15 @@ struct PitchPoint: Codable {
     }
 }
 
-struct PitchTrack: Codable {
-    let algo: String?
-    let sr: Int?
-    let hop: Int?
+struct PitchTrack: Decodable {
+    let algo: String?   // null 対応
+    let sr: Int?        // null 対応
+    let hop: Int?       // null 対応
     let track: [PitchPoint]?
 }
 
-struct PitchEvent: Codable, Identifiable {
+struct PitchEvent: Decodable, Identifiable {
+    /// JSONには無いので decode 対象外（CodingKeysに入れない）
     let id = UUID()
     
     let start: Double?
@@ -37,7 +39,12 @@ struct PitchEvent: Codable, Identifiable {
 
 // MARK: - Summary / Meta
 
-struct AnalysisSummary: Codable {
+/// ✅ 今サーバが返している summary 形式に合わせる
+/// - tips: [String]（あなたのログは配列）
+/// - tol_cents などはそのまま
+///
+/// ※ 将来スコア系（percentWithinTol 等）を追加しても Optional なので壊れにくい
+struct AnalysisSummary: Decodable {
     let tolCents: Double?
     let frames: Int?
     let seconds: Double?
@@ -54,9 +61,12 @@ struct AnalysisSummary: Codable {
     let p90Cents: Double?
     
     let unvoicedMissSeconds: Double?
+    
     let verdict: String?
     let reason: String?
-    let tips: String?
+    
+    /// ✅ ここが旧モデルと違う：配列
+    let tips: [String]?
     
     enum CodingKeys: String, CodingKey {
         case tolCents = "tol_cents"
@@ -74,34 +84,60 @@ struct AnalysisSummary: Codable {
     }
 }
 
-struct AnalysisMeta: Codable {
-    struct Paths: Codable {
-        let refPitch: String?
-        let usrPitch: String?
-        
-        enum CodingKeys: String, CodingKey {
-            case refPitch = "ref_pitch"
-            case usrPitch = "usr_pitch"
-        }
+/// meta.counts が辞書っぽい構造なので型を用意
+struct AnalysisCounts: Decodable {
+    let events: Int?
+    let refTrack: Int?
+    let usrTrack: Int?
+    
+    enum CodingKeys: String, CodingKey {
+        case events
+        case refTrack = "ref_track"
+        case usrTrack = "usr_track"
     }
-    let paths: Paths?
 }
 
-struct AnalysisResponse: Codable {
+struct AnalysisMeta: Decodable {
+    /// ✅ サーバは paths を「任意キーの辞書」で返している
+    let paths: [String: String]?
+    let counts: AnalysisCounts?
+}
+
+// MARK: - AnalysisResponse
+
+/// ✅ /api/analysis の現行レスポンスに合わせる
+/// あなたのログには ok / session_id / song_id / user_id / ref_pitch / usr_pitch / events / summary / meta がある
+struct AnalysisResponse: Decodable {
+    let ok: Bool
+    let message: String?
+    
     let sessionId: String?
+    let songId: String?
     let userId: String?
+    
     let events: [PitchEvent]?
     let summary: AnalysisSummary?
+    
     let usrPitch: PitchTrack?
     let refPitch: PitchTrack?
+    
     let meta: AnalysisMeta?
     
     enum CodingKeys: String, CodingKey {
+        case ok
+        case message
+        
         case sessionId = "session_id"
+        case songId = "song_id"
         case userId = "user_id"
-        case events, summary, meta
+        
+        case events
+        case summary
+        
         case usrPitch = "usr_pitch"
         case refPitch = "ref_pitch"
+        
+        case meta
     }
 }
 

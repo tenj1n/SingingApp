@@ -1,0 +1,8 @@
+{
+  "verdict": "解析失敗",
+  "reason": "参照音源が見つかりません: song_id not found in catalog: orpheus",
+  "tips": [
+    "song_id が正しいか確認してください。"
+  ],
+  "tol_cents": 40.0
+}

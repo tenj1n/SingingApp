@@ -5,15 +5,31 @@ import sqlite3
 import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional  # ✅ 追加（Python 3.9 以下対応）
 
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 
 from openai import OpenAI  # pip install openai
 
+# 追加（解析用）
+import math
+import numpy as np
 
+try:
+    import librosa
+except Exception:
+    librosa = None
+
+
+# ==================================================
+# App / Config
+# ==================================================
 app = Flask(__name__)
 CORS(app)
+
+app.url_map.strict_slashes = False
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
 openai_client = OpenAI()
 
@@ -22,32 +38,45 @@ PROJECT_DIR = BASE_DIR / "SingingApp"
 ANALYSIS_DIR = PROJECT_DIR / "analysis"
 ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
 
-# 既存：アップロード（保存のみ）用
 UPLOAD_DIR = ANALYSIS_DIR / "user01" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# 追加：歌声アップロード保存先（ユーザ別）
 VOICE_ROOT = ANALYSIS_DIR / "voices"
 VOICE_ROOT.mkdir(parents=True, exist_ok=True)
 
-# SQLite DB
+SESSIONS_ROOT = ANALYSIS_DIR / "sessions"
+SESSIONS_ROOT.mkdir(parents=True, exist_ok=True)
+
 DB_PATH = ANALYSIS_DIR / "history.sqlite3"
 
-# --------------------------------------------------
-# 研究ログ用の「実験条件」デフォルト
-# --------------------------------------------------
-PROMPT_VERSION_DEFAULT = "v1"
-AI_MODEL_NAME = "gpt-5.2"
+PROMPT_VERSION_DEFAULT = os.environ.get("PROMPT_VERSION_DEFAULT", "v1")
+AI_MODEL_NAME = os.environ.get("AI_MODEL_NAME", "gpt-5.2")
 
 
-# --------------------------------------------------
-# 共通ヘルパー
-# --------------------------------------------------
+# ==================================================
+# ✅ Reference audio location (あなたの構成に合わせる)
+# ==================================================
+APP_AUDIO_DIR = PROJECT_DIR / "App" / "Audio"
+
+# songs カタログ（Xcodeでは拡張子なしの "songs" になってる可能性があるので両対応）
+SONGS_CATALOG_CANDIDATES = [
+    APP_AUDIO_DIR / "songs.json",
+    APP_AUDIO_DIR / "songs",
+]
+
+
+# ==================================================
+# Common helpers
+# ==================================================
 def json_error(status: int, code: str, message: str, **extra):
     payload = {"ok": False, "code": code, "message": message}
     if extra:
         payload["extra"] = extra
     return jsonify(payload), status
+
+
+def safe_len(x):
+    return len(x) if isinstance(x, list) else None
 
 
 def read_json_or_error(path: Path, label: str):
@@ -60,8 +89,10 @@ def read_json_or_error(path: Path, label: str):
         raise ValueError(f"{label} invalid JSON: {path} ({e})")
 
 
-def safe_len(x):
-    return len(x) if isinstance(x, list) else None
+def write_json(path: Path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
 def require_openai_key_or_error():
@@ -89,13 +120,192 @@ def iso_utc_z():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def ensure_dir(path: Path):
-    path.mkdir(parents=True, exist_ok=True)
+def make_take_id() -> str:
+    # 例: 20260109_211530_ab12cd
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    short = uuid.uuid4().hex[:6]
+    return f"{ts}_{short}"
 
 
-# --------------------------------------------------
-# SQLite（履歴）ヘルパー
-# --------------------------------------------------
+def parse_session_id(session_id: str):
+    """
+    session_id は以下を許容
+    - song/user
+    - song/user/take
+    それ以外はエラー
+    """
+    parts = [p for p in session_id.split("/") if p]
+    if len(parts) == 2:
+        return parts[0], parts[1], None
+    if len(parts) >= 3:
+        return parts[0], parts[1], parts[2]
+    raise ValueError(f"invalid session_id: {session_id}")
+
+
+def get_session_dir(song_id: str, user_id: str, take_id: Optional[str]) -> Path:
+    # ✅ Python 3.9 以下でも動くように Optional[str] に変更
+    if take_id:
+        return SESSIONS_ROOT / song_id / user_id / take_id
+    return SESSIONS_ROOT / song_id / user_id
+
+
+# ==================================================
+# ✅ songs catalog / reference resolver
+# ==================================================
+_songs_cache = None
+
+
+def load_songs_catalog():
+    global _songs_cache
+    if _songs_cache is not None:
+        return _songs_cache
+
+    for p in SONGS_CATALOG_CANDIDATES:
+        if p.exists():
+            data = read_json_or_error(p, "songs_catalog")
+            # {"songs":[...]} 形式
+            songs = data.get("songs") if isinstance(data, dict) else None
+            if isinstance(songs, list):
+                _songs_cache = songs
+                return _songs_cache
+
+    # 見つからない場合は空
+    _songs_cache = []
+    return _songs_cache
+
+
+def resolve_song(song_id: str):
+    songs = load_songs_catalog()
+    for s in songs:
+        if isinstance(s, dict) and s.get("id") == song_id:
+            return s
+    return None
+
+
+def resolve_reference_audio_path(song_id: str) -> Path:
+    """
+    基本は songs カタログの singer を参照音源にする。
+    見つからなければ例外にして、summary で理由を返す。
+    """
+    song = resolve_song(song_id)
+    if not song:
+        raise FileNotFoundError(f"song_id not found in catalog: {song_id}")
+
+    singer = song.get("singer")
+    if not singer:
+        raise FileNotFoundError(f"singer file not set for song_id: {song_id}")
+
+    p = APP_AUDIO_DIR / singer
+    if not p.exists():
+        raise FileNotFoundError(f"reference audio not found: {p}")
+
+    return p
+
+
+# ==================================================
+# ✅ Pitch extraction
+# ==================================================
+def _require_librosa():
+    if librosa is None:
+        raise RuntimeError("librosa is not installed. Run: pip install librosa numpy soundfile")
+
+
+def extract_pitch_track(audio_path: Path, sr: int = 44100, hop: int = 512):
+    """
+    librosa.pyin で F0 を抽出して、
+    {algo,sr,hop,track:[{t,f0_hz},...]} を返す
+    """
+    _require_librosa()
+
+    y, _sr = librosa.load(str(audio_path), sr=sr, mono=True)
+    if y is None or len(y) == 0:
+        return {"algo": "pyin", "sr": sr, "hop": hop, "track": []}
+
+    # pyin（歌声向け）
+    f0, voiced_flag, voiced_prob = librosa.pyin(
+        y,
+        fmin=librosa.note_to_hz("C2"),
+        fmax=librosa.note_to_hz("C7"),
+        sr=sr,
+        hop_length=hop,
+    )
+
+    # 時間軸
+    times = librosa.times_like(f0, sr=sr, hop_length=hop)
+
+    track = []
+    for t, hz, v in zip(times, f0, voiced_flag):
+        if hz is None or (isinstance(hz, float) and (math.isnan(hz) or hz <= 0)) or (v is False):
+            track.append({"t": float(t), "f0_hz": None})
+        else:
+            track.append({"t": float(t), "f0_hz": float(hz)})
+
+    return {"algo": "pyin", "sr": sr, "hop": hop, "track": track}
+
+
+def cents_diff(u_hz: float, r_hz: float) -> float:
+    return 1200.0 * math.log2(u_hz / r_hz)
+
+
+def make_summary_from_tracks(usr_pitch: dict, ref_pitch: dict, tol_cents: float = 40.0):
+    """
+    track を同フレームで突き合わせて、簡易統計を作る
+    """
+    ut = (usr_pitch or {}).get("track") or []
+    rt = (ref_pitch or {}).get("track") or []
+    n = min(len(ut), len(rt))
+    if n == 0:
+        return {
+            "verdict": "解析失敗",
+            "reason": "ピッチデータが生成できませんでした。",
+            "tips": ["もう一度短いフレーズで録音してください。"],
+            "tol_cents": float(tol_cents),
+        }
+
+    diffs = []
+    for i in range(n):
+        u = ut[i].get("f0_hz") if isinstance(ut[i], dict) else None
+        r = rt[i].get("f0_hz") if isinstance(rt[i], dict) else None
+        if u is None or r is None:
+            continue
+        try:
+            d = abs(cents_diff(float(u), float(r)))
+            diffs.append(d)
+        except Exception:
+            continue
+
+    if len(diffs) == 0:
+        return {
+            "verdict": "解析失敗",
+            "reason": "比較できる有声区間がありませんでした。",
+            "tips": ["はっきり声を出して録音してみてください。"],
+            "tol_cents": float(tol_cents),
+        }
+
+    diffs_np = np.array(diffs, dtype=np.float64)
+    mean_abs = float(np.mean(diffs_np))
+    within = float(np.mean(diffs_np <= tol_cents))
+
+    seconds = (n * (usr_pitch.get("hop") or 512)) / float(usr_pitch.get("sr") or 44100)
+
+    return {
+        "verdict": "解析完了",
+        "reason": "解析が完了しました。",
+        "tips": [
+            "短いフレーズで録音して、同じ高さをまっすぐ保つ練習をしてください。",
+            "歌手音源の一部を真似して、声の出だしをそろえてみてください。"
+        ],
+        "tol_cents": float(tol_cents),
+        "frames": int(n),
+        "seconds": float(seconds),
+        "mean_cents": mean_abs,
+        "percent_within_tol": within,
+    }
+
+
+# ==================================================
+# SQLite (history)
+# ==================================================
 def get_db():
     if "db" not in g:
         conn = sqlite3.connect(DB_PATH)
@@ -174,45 +384,17 @@ def init_db():
     conn.close()
 
 
-def row_to_item(r: sqlite3.Row):
-    return {
-        "id": r["id"],
-        "song_id": r["song_id"],
-        "user_id": r["user_id"],
-        "created_at": r["created_at"],
-
-        "comment_title": r["comment_title"],
-        "comment_body": r["comment_body"],
-
-        "score100": r["score100"],
-        "score100_strict": r["score100_strict"],
-        "score100_octave_invariant": r["score100_octave_invariant"],
-        "octave_invariant_now": (bool(r["octave_invariant_now"]) if r["octave_invariant_now"] is not None else None),
-
-        "tol_cents": r["tol_cents"],
-        "percent_within_tol": r["percent_within_tol"],
-        "mean_abs_cents": r["mean_abs_cents"],
-        "sample_count": r["sample_count"],
-
-        "comment_source": r["comment_source"],
-        "prompt_version": r["prompt_version"],
-        "model": r["model"],
-        "app_version": r["app_version"],
-    }
-
-
-# --------------------------------------------------
-# ヘルスチェック
-# --------------------------------------------------
+# ==================================================
+# Health
+# ==================================================
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "service": "singing-backend"})
 
 
-# --------------------------------------------------
-# 既存：録音ファイルアップロード（保存のみ）
-# フィールド名: audio
-# --------------------------------------------------
+# ==================================================
+# Existing: /upload (kept for compatibility)
+# ==================================================
 @app.post("/upload")
 def upload():
     if "audio" not in request.files:
@@ -237,82 +419,142 @@ def upload():
     )
 
 
-# --------------------------------------------------
-# 追加：ユーザ歌声アップロード（比較に使う入口）
+# ==================================================
+# ✅ voice upload
 # POST /api/voice/<user_id>
-# multipart: file または audio を受け取る（両対応）
-# query: ?song_id=orphans（未指定なら orphans）
-# 保存先: analysis/voices/<user_id>/
-# --------------------------------------------------
+# multipart: file or audio
+# query: ?song_id=orpheus
+# ==================================================
 @app.post("/api/voice/<user_id>")
 def upload_voice(user_id: str):
     try:
-        # CompareView が想定する song_id/user_id 形式に合わせる
-        song_id = request.args.get("song_id") or "orphans"
+        # ✅ song_id はクエリ or フォームから受ける（どちらでもOK）
+        song_id = (request.args.get("song_id") or request.form.get("song_id") or "").strip()
+        if not song_id:
+            return json_error(400, "BAD_REQUEST", "song_id is required (query or form)")
 
-        # フォームフィールド名は file / audio どっちでも受ける
         f = request.files.get("file") or request.files.get("audio")
         if f is None:
             return json_error(400, "BAD_REQUEST", "file is required (multipart field name: file or audio)")
-
         if not f.filename:
             return json_error(400, "BAD_REQUEST", "empty filename")
 
-        # 拡張子（iOSはwav推奨。m4aでも一旦保存はできる）
         ext = (Path(f.filename).suffix or ".wav").lower()
         if ext not in [".wav", ".m4a", ".caf", ".aac"]:
-            # とりあえず弾く。必要なら許可拡張子を増やす
             return json_error(400, "BAD_REQUEST", f"unsupported extension: {ext}")
 
-        user_dir = VOICE_ROOT / user_id
-        ensure_dir(user_dir)
+        # ✅ 録音ごとに take_id を作る（上書きしない）
+        take_id = make_take_id()
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        short = uuid.uuid4().hex[:8]
-        file_id = uuid.uuid4().hex
-        filename = f"user_voice_{ts}_{short}_{file_id}{ext}"
-        save_path = user_dir / filename
-        f.save(save_path)
+        sess_dir = get_session_dir(song_id, user_id, take_id)
+        sess_dir.mkdir(parents=True, exist_ok=True)
 
-        # ここが重要：アプリ側がそのまま CompareView(sessionId:) に渡せる形
-        session_id = f"{song_id}/{user_id}"
+        in_audio_path = sess_dir / f"input{ext}"
+        f.save(in_audio_path)
+
+        # ✅ 必ず解析まで作る（CompareViewでスコア/グラフを出すため）
+        _run_analysis_and_write_files(song_id, user_id, take_id, sess_dir, in_audio_path)
+
+        session_id = f"{song_id}/{user_id}/{take_id}"
 
         return jsonify({
             "ok": True,
             "session_id": session_id,
             "song_id": song_id,
             "user_id": user_id,
-            "file_id": file_id,
-            "saved_path": str(save_path),
-            "message": "saved"
+            "take_id": take_id,
+            "saved_path": str(in_audio_path),
+            "message": "uploaded_and_analyzed"
         })
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# --------------------------------------------------
-# 解析結果をまとめて返す API
-# 例: /api/analysis/orphans/user01
-# --------------------------------------------------
-@app.get("/api/analysis/<song_id>/<user_id>")
-def get_analysis(song_id: str, user_id: str):
+def _run_analysis_and_write_files(song_id: str, user_id: str, take_id: str, sess_dir: Path, in_audio_path: Path):
+    """
+    usr_pitch/ref_pitch/events/summary を作って session dir に保存
+    """
+    # 参照音源（singer）
     try:
-        ref_pitch_path = ANALYSIS_DIR / "songs" / song_id / "ref" / "pitch.json"
+        ref_audio_path = resolve_reference_audio_path(song_id)
+    except Exception as e:
+        # 参照が無いと比較できないので、最低限のJSONは作って理由を返す
+        usr_pitch = {"algo": "none", "sr": 44100, "hop": 512, "track": []}
+        ref_pitch = {"algo": "none", "sr": None, "hop": None, "track": []}
+        events = []
+        summary = {
+            "verdict": "解析失敗",
+            "reason": f"参照音源が見つかりません: {e}",
+            "tips": ["song_id が正しいか確認してください。"],
+            "tol_cents": 40.0
+        }
+        write_json(sess_dir / "usr_pitch.json", usr_pitch)
+        write_json(sess_dir / "ref_pitch.json", ref_pitch)
+        write_json(sess_dir / "events.json", events)
+        write_json(sess_dir / "summary.json", summary)
+        return
 
-        usr_dir = ANALYSIS_DIR / user_id
-        usr_pitch_path = usr_dir / "pitch.json"
-        events_path = usr_dir / "events.json"
-        summary_path = usr_dir / "summary.json"
+    # pitch 抽出
+    usr_pitch = extract_pitch_track(in_audio_path, sr=44100, hop=512)
+    ref_pitch = extract_pitch_track(ref_audio_path, sr=44100, hop=512)
+
+    # events は今は空（将来ズレ区間検出を入れる）
+    events = []
+
+    summary = make_summary_from_tracks(usr_pitch, ref_pitch, tol_cents=40.0)
+
+    write_json(sess_dir / "usr_pitch.json", usr_pitch)
+    write_json(sess_dir / "ref_pitch.json", ref_pitch)
+    write_json(sess_dir / "events.json", events)
+    write_json(sess_dir / "summary.json", summary)
+
+
+# ==================================================
+# Analysis API
+# GET /api/analysis/<path:session_id>
+# ==================================================
+@app.get("/api/analysis/<path:session_id>")
+def get_analysis(session_id: str):
+    try:
+        song_id, user_id, take_id = parse_session_id(session_id)
+
+        # take_id が無い旧形式が来たら、最新 take を探す（互換）
+        if take_id is None:
+            base = get_session_dir(song_id, user_id, None)
+            if not base.exists():
+                raise FileNotFoundError(f"session base not found: {base}")
+            takes = sorted([p for p in base.iterdir() if p.is_dir()])
+            if not takes:
+                raise FileNotFoundError(f"no takes found: {base}")
+            sess_dir = takes[-1]
+        else:
+            sess_dir = get_session_dir(song_id, user_id, take_id)
+
+        ref_pitch_path = sess_dir / "ref_pitch.json"
+        usr_pitch_path = sess_dir / "usr_pitch.json"
+        events_path = sess_dir / "events.json"
+        summary_path = sess_dir / "summary.json"
+
+        # 無ければ解析し直す（デバッグが楽）
+        if not (ref_pitch_path.exists() and usr_pitch_path.exists() and events_path.exists() and summary_path.exists()):
+            input_candidates = list(sess_dir.glob("input.*"))
+            if not input_candidates:
+                raise FileNotFoundError(f"input audio not found in session dir: {sess_dir}")
+            _run_analysis_and_write_files(song_id, user_id, take_id or "unknown", sess_dir, input_candidates[0])
 
         ref_pitch = read_json_or_error(ref_pitch_path, "ref_pitch")
         usr_pitch = read_json_or_error(usr_pitch_path, "usr_pitch")
         events = read_json_or_error(events_path, "events")
         summary = read_json_or_error(summary_path, "summary")
 
-        resp = {
+        # 返す session_id は必ず 3階層にする
+        resolved_take = sess_dir.name
+        resolved_session_id = f"{song_id}/{user_id}/{resolved_take}"
+
+        return jsonify({
             "ok": True,
-            "session_id": f"demo-{song_id}-{user_id}",
+            "session_id": resolved_session_id,
             "song_id": song_id,
             "user_id": user_id,
             "ref_pitch": ref_pitch,
@@ -326,47 +568,46 @@ def get_analysis(song_id: str, user_id: str):
                     "events": str(events_path),
                     "summary": str(summary_path),
                 },
-                "sizes": {
-                    "ref_pitch_bytes": ref_pitch_path.stat().st_size,
-                    "usr_pitch_bytes": usr_pitch_path.stat().st_size,
-                    "events_bytes": events_path.stat().st_size,
-                    "summary_bytes": summary_path.stat().st_size,
-                },
                 "counts": {
                     "ref_track": safe_len(ref_pitch.get("track")) if isinstance(ref_pitch, dict) else None,
                     "usr_track": safe_len(usr_pitch.get("track")) if isinstance(usr_pitch, dict) else None,
                     "events": safe_len(events),
                 },
             },
-        }
-        return jsonify(resp)
+        })
 
     except FileNotFoundError as e:
         return json_error(404, "FILE_NOT_FOUND", str(e))
     except ValueError as e:
-        return json_error(500, "INVALID_JSON", str(e))
+        return json_error(500, "INVALID_SESSION", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# --------------------------------------------------
-# AIコメント生成 API
-# 例: POST /api/comment/orphans/user01
-# --------------------------------------------------
-@app.post("/api/comment/<song_id>/<user_id>")
-def ai_comment(song_id: str, user_id: str):
+# ==================================================
+# AI comment
+# POST /api/comment/<path:session_id>
+# ==================================================
+@app.post("/api/comment/<path:session_id>")
+def ai_comment(session_id: str):
     try:
         require_openai_key_or_error()
 
-        usr_dir = ANALYSIS_DIR / user_id
-        events_path = usr_dir / "events.json"
-        summary_path = usr_dir / "summary.json"
+        song_id, user_id, take_id = parse_session_id(session_id)
+        if take_id is None:
+            return json_error(400, "BAD_REQUEST", "session_id must include take_id (song/user/take)")
+
+        sess_dir = get_session_dir(song_id, user_id, take_id)
+        events_path = sess_dir / "events.json"
+        summary_path = sess_dir / "summary.json"
 
         events = []
         summary = {}
         try:
-            events = read_json_or_error(events_path, "events")
-            summary = read_json_or_error(summary_path, "summary")
+            if events_path.exists():
+                events = read_json_or_error(events_path, "events")
+            if summary_path.exists():
+                summary = read_json_or_error(summary_path, "summary")
         except Exception:
             events = []
             summary = {}
@@ -426,13 +667,6 @@ def ai_comment(song_id: str, user_id: str):
 - 数字は基本1つまで（秒も出さない）
 - 必ず「今日やる練習」を2つ書く（すぐできる内容）
 - 最後に一言だけ励ます
-
-構成：
-1行目：今の傾向
-2行目：原因の可能性
-3〜4行目：練習①②（具体的に）
-5行目：目標
-6行目：励まし
 """.strip()
 
         user = "次のJSONを読んでコメントを作成してください。\n" + json.dumps(model_input, ensure_ascii=False)
@@ -448,7 +682,13 @@ def ai_comment(song_id: str, user_id: str):
         llm_text = (getattr(resp, "output_text", "") or "").strip()
         title, body = _normalize_ai_comment(llm_text)
 
-        return jsonify({"ok": True, "title": title, "body": body, "model": AI_MODEL_NAME, "prompt_version": PROMPT_VERSION_DEFAULT})
+        return jsonify({
+            "ok": True,
+            "title": title,
+            "body": body,
+            "model": AI_MODEL_NAME,
+            "prompt_version": PROMPT_VERSION_DEFAULT
+        })
 
     except RuntimeError as e:
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
@@ -456,10 +696,10 @@ def ai_comment(song_id: str, user_id: str):
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# --------------------------------------------------
-# ★履歴：追加（保存） API（SQLite）
-# 例: POST /api/history/orphans/user01/append
-# --------------------------------------------------
+# ==================================================
+# History append/list/delete
+# （ここは変更なし：song_id/user_id 単位で履歴管理が自然）
+# ==================================================
 @app.post("/api/history/<song_id>/<user_id>/append")
 def history_append(song_id: str, user_id: str):
     try:
@@ -533,44 +773,15 @@ def history_append(song_id: str, user_id: str):
             if row is None:
                 return jsonify({"ok": True, "item": None, "message": "duplicate"}), 200
 
-            item = row_to_item(row)
+            item = dict(row)
             return jsonify({"ok": True, "item": item, "message": "duplicate"}), 200
 
-        item = {
-            "id": history_id,
-            "song_id": song_id,
-            "user_id": user_id,
-            "created_at": created_at,
-
-            "comment_title": str(comment_title),
-            "comment_body": str(comment_body),
-
-            "score100": score100,
-            "score100_strict": score100_strict,
-            "score100_octave_invariant": score100_oct,
-            "octave_invariant_now": bool(octave_now),
-
-            "tol_cents": tol_cents,
-            "percent_within_tol": percent_within,
-            "mean_abs_cents": mean_abs,
-            "sample_count": sample_count,
-
-            "comment_source": comment_source,
-            "prompt_version": prompt_version,
-            "model": model_name,
-            "app_version": app_version,
-        }
-        return jsonify({"ok": True, "item": item, "message": None})
+        return jsonify({"ok": True, "item": {"id": history_id, "created_at": created_at}, "message": None})
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# --------------------------------------------------
-# 履歴：一覧 API（SQLite）
-# 例: GET /api/history/user01
-# 追加: ?source=ai&prompt=v1&model=gpt-5.2&limit=50&offset=0
-# --------------------------------------------------
 @app.get("/api/history/<user_id>")
 def history_list(user_id: str):
     try:
@@ -625,41 +836,28 @@ def history_list(user_id: str):
                 "song_id": r["song_id"],
                 "user_id": r["user_id"],
                 "created_at": r["created_at"],
-
                 "comment_title": r["comment_title"] or "",
                 "comment_body": r["comment_body"] or "",
-
                 "score100": r["score100"],
                 "score100_strict": r["score100_strict"],
                 "score100_octave_invariant": r["score100_octave_invariant"],
                 "octave_invariant_now": bool(r["octave_invariant_now"]) if r["octave_invariant_now"] is not None else None,
-
                 "tol_cents": r["tol_cents"],
                 "percent_within_tol": r["percent_within_tol"],
                 "mean_abs_cents": r["mean_abs_cents"],
                 "sample_count": r["sample_count"],
-
                 "comment_source": r["comment_source"],
                 "prompt_version": r["prompt_version"],
                 "model": r["model"],
                 "app_version": r["app_version"],
             })
 
-        return jsonify({
-            "ok": True,
-            "user_id": user_id,
-            "items": items,
-            "message": None
-        })
+        return jsonify({"ok": True, "user_id": user_id, "items": items, "message": None})
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# --------------------------------------------------
-# 履歴：削除 API（SQLite）
-# 例: DELETE /api/history/user01/<history_id>
-# --------------------------------------------------
 @app.delete("/api/history/<user_id>/<history_id>")
 def history_delete(user_id: str, history_id: str):
     try:
@@ -677,6 +875,9 @@ def history_delete(user_id: str, history_id: str):
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
+# ==================================================
+# Main
+# ==================================================
 if __name__ == "__main__":
     init_db()
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

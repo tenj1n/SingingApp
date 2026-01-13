@@ -13,6 +13,12 @@ struct CompareView: View {
     @State private var maxOverlayPlotPoints: Int = 2500
     @State private var showHistory = false
     
+    // ✅ 追加：サンプル不足判定（評価を出す最低サンプル数）
+    private let minSampleCountForEvaluation = 200
+    
+    // ✅ 追加：ピッチ線の「飛び」を線で繋いで誤解しないため（これ以上空いたら線を切る）
+    private let overlayGapSec = 0.25
+    
     init(sessionId: String = "orphans/user01") {
         self.sessionId = sessionId
     }
@@ -54,7 +60,7 @@ struct CompareView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     summarySection(a)
-                    commentSection()      // ← ここにボタンが入る
+                    commentSection()
                     settingsSection(a)
                     
                     Divider()
@@ -88,6 +94,9 @@ struct CompareView: View {
         let eventCount = a.events?.count ?? 0
         let tol = a.summary?.tolCents ?? 40.0
         
+        // ✅ 追加：サンプル不足判定
+        let lowConfidence = vm.sampleCount < minSampleCountForEvaluation
+        
         return VStack(alignment: .leading, spacing: 8) {
             Text("比較結果概要").font(.title3.bold())
             
@@ -97,14 +106,17 @@ struct CompareView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("スコア \(vm.score100, specifier: "%.1f") 点")
                     .font(.title3.bold())
+                    .opacity(lowConfidence ? 0.35 : 1.0)
                 
                 Text("通常: \(vm.score100Strict, specifier: "%.1f") 点 / オクターブ無視: \(vm.score100OctaveInvariant, specifier: "%.1f") 点")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .opacity(lowConfidence ? 0.35 : 1.0)
                 
                 Text("一致率: \(vm.percentWithinTol * 100, specifier: "%.1f")% / 平均ズレ: \(vm.meanAbsCents, specifier: "%.1f")c")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .opacity(lowConfidence ? 0.35 : 1.0)
             }
             .padding(.top, 2)
             
@@ -112,7 +124,23 @@ struct CompareView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            // ✅ 差し替え：a.meta?.paths は辞書なので ["ref_pitch"] などで参照する
+            // ✅ 追加：サンプル不足の注意（誤解防止）
+            if lowConfidence {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("声検出不足のため、評価の信頼性が低いです")
+                        .font(.subheadline.weight(.semibold))
+                    Text("有効サンプル数が少ない状態では、外音やノイズの誤検出でスコアやズレが不正確になります。マイクを近づける／声量を上げる／イヤホン使用などを試してください。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("有効サンプル数: \(vm.sampleCount)（目安: \(minSampleCountForEvaluation)以上）")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            
             if let paths = a.meta?.paths {
                 if let ref = paths["ref_pitch"] {
                     Text("参照ピッチ：\(ref)")
@@ -147,7 +175,6 @@ struct CompareView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(vm.commentTitle).font(.headline)
             
-            // ★AI生成ボタン + ローディング表示
             HStack(spacing: 12) {
                 if vm.isAICommentLoading {
                     ProgressView()
@@ -160,6 +187,7 @@ struct CompareView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(vm.isAICommentLoading)
+                    
                     Button(vm.isHistorySaved ? "保存済み" : (vm.isHistorySaving ? "保存中…" : "履歴に保存")) {
                         vm.saveAICommentToHistory()
                     }
@@ -176,14 +204,12 @@ struct CompareView: View {
                 Spacer()
             }
             
-            // ★エラー表示
             if let e = vm.aiCommentError, !e.isEmpty {
                 Text(e)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
             
-            // コメント本文
             Text(vm.commentBody.isEmpty ? "（まだありません）" : vm.commentBody)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -241,36 +267,102 @@ struct CompareView: View {
     
     // MARK: - Pitch Overlay
     
+    // ✅ 変更：midi を Optional にして「nil で線を切る」ための点を入れられるようにする
     private struct OverlayPlotPoint: Identifiable {
         let id = UUID()
         let time: Double
-        let midi: Double
+        let midi: Double?
         let series: String
     }
     
     private func pitchOverlaySection(_ a: AnalysisResponse) -> some View {
+        // ✅ 追加：サンプル不足判定（誤解防止）
+        let lowConfidence = vm.sampleCount < minSampleCountForEvaluation
+        
+        // vm.overlayPoints から plot 点を生成
         let raw: [OverlayPlotPoint] = vm.overlayPoints.map {
             .init(time: $0.time, midi: $0.midi, series: $0.series.rawValue)
         }
-        let plot = downsampleToMax(raw.sorted(by: { $0.time < $1.time }), maxPoints: maxOverlayPlotPoints)
+        
+        // 軽量化（最大点数）
+        let sortedAll = raw.sorted { $0.time < $1.time }
+        let downsampledAll = downsampleToMax(sortedAll, maxPoints: maxOverlayPlotPoints)
+        
+        // 系列ごとに分ける
+        let grouped = Dictionary(grouping: downsampledAll, by: { $0.series })
+        
+        // ギャップが開いたら線を切る（nil を挟む）
+        func breakLineOnGaps(_ pts: [OverlayPlotPoint]) -> [OverlayPlotPoint] {
+            guard !pts.isEmpty else { return [] }
+            var out: [OverlayPlotPoint] = []
+            out.reserveCapacity(pts.count + 16)
+            
+            var prevT: Double? = nil
+            for p in pts {
+                if let prev = prevT, (p.time - prev) > overlayGapSec {
+                    out.append(.init(time: p.time, midi: nil, series: p.series))
+                }
+                out.append(p)
+                prevT = p.time
+            }
+            return out
+        }
+        
+        // PitchMath 側で series.rawValue が「自分」「歌手」想定
+        let refSeries = "歌手"
+        let usrSeries = "自分"
+        
+        let refPts = breakLineOnGaps((grouped[refSeries] ?? []).sorted { $0.time < $1.time })
+        let usrPts = breakLineOnGaps((grouped[usrSeries] ?? []).sorted { $0.time < $1.time })
         
         return VStack(alignment: .leading, spacing: 8) {
             Text("ピッチ比較（自分 vs 歌手）").font(.headline)
             Text("縦軸は「音名（MIDIノート）」。線が近いほど同じ音程です。")
                 .font(.caption2).foregroundStyle(.secondary)
             
-            if plot.isEmpty {
+            if lowConfidence {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("声検出不足のため、ピッチ線表示を抑止します")
+                        .font(.subheadline.weight(.semibold))
+                    Text("点が少ない状態で線を引くと、外音や誤検出の点が“それっぽい形”に見えることがあります。録音条件を改善して再計測してください。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("有効サンプル数: \(vm.sampleCount)（目安: \(minSampleCountForEvaluation)以上）")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+            } else if refPts.isEmpty && usrPts.isEmpty {
                 Text("ピッチデータがありません").foregroundStyle(.secondary)
+                
             } else {
                 Chart {
-                    ForEach(plot) { p in
-                        LineMark(
-                            x: .value("時間（秒）", p.time),
-                            y: .value("音程（ノート）", p.midi),
-                            series: .value("系列", p.series)
-                        )
-                        .foregroundStyle(by: .value("系列", p.series))
-                        .interpolationMethod(.catmullRom)
+                    // 歌手：線（ギャップで分割 / 直線補間）
+                    ForEach(refPts) { p in
+                        if let m = p.midi {
+                            LineMark(
+                                x: .value("時間（秒）", p.time),
+                                y: .value("音程（ノート）", m)
+                            )
+                            .foregroundStyle(by: .value("系列", refSeries))
+                            .interpolationMethod(.linear)
+                        }
+                    }
+                    
+                    // 自分：点（飛び飛びの点を線で結ばない）
+                    ForEach(usrPts) { p in
+                        if let m = p.midi {
+                            PointMark(
+                                x: .value("時間（秒）", p.time),
+                                y: .value("音程（ノート）", m)
+                            )
+                            .symbolSize(12)
+                            .foregroundStyle(by: .value("系列", usrSeries))
+                            .opacity(0.9)
+                        }
                     }
                 }
                 .frame(height: 320)
@@ -315,90 +407,122 @@ struct CompareView: View {
         let cents: Double
     }
     
+    // MARK: - Error (cents)
+    
+    @ViewBuilder
     private func errorCentsSection(_ a: AnalysisResponse) -> some View {
         let tol = a.summary?.tolCents ?? 40.0
         
-        let raw: [ErrorPlotPoint] = vm.errorPoints.map { .init(time: $0.time, cents: $0.cents) }
-            .sorted(by: { $0.time < $1.time })
+        // ✅ サンプル不足なら「評価しない」表示
+        let lowConfidence = vm.sampleCount < minSampleCountForEvaluation
         
-        let (plot, xMin, xMax) = makeErrorPlotPoints(src: raw, tol: tol, onlyOut: showOnlyOutOfTol, maxPoints: maxErrorPlotPoints)
-        let trend: [TrendPoint] = showTrendLine ? makeTrend(points: plot, bins: 80) : []
-        
-        let maxAbs = plot.map { abs($0.cents) }.max() ?? 0
-        let yMax = max(200.0, min(600.0, max(maxAbs * 1.1, tol * 2.0)))
-        let yDomain = (-yMax)...(yMax)
-        
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("ズレ（cents）").font(.headline)
             Text("0 が基準。＋は自分が高い／−は自分が低い。灰色の帯が許容範囲（±\(Int(tol))c）。")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             
-            if plot.isEmpty {
-                Text("ズレデータがありません").foregroundStyle(.secondary)
-            } else {
-                Chart {
-                    RectangleMark(
-                        xStart: .value("開始", xMin),
-                        xEnd: .value("終了", xMax),
-                        yStart: .value("下限", -tol),
-                        yEnd: .value("上限", tol)
-                    )
-                    .foregroundStyle(.gray.opacity(0.12))
-                    
-                    RuleMark(y: .value("基準", 0))
-                        .lineStyle(StrokeStyle(lineWidth: 1))
-                    
-                    RuleMark(y: .value("許容上", tol))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    
-                    RuleMark(y: .value("許容下", -tol))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    
-                    ForEach(plot) { p in
-                        PointMark(
-                            x: .value("時間（秒）", p.time),
-                            y: .value("ズレ（cents）", p.cents)
-                        )
-                        .symbolSize(10)
-                        .opacity(showOnlyOutOfTol ? 0.85 : 0.35)
-                    }
-                    
-                    ForEach(trend) { t in
-                        LineMark(
-                            x: .value("時間（秒）", t.time),
-                            y: .value("平均ズレ（cents）", t.cents)
-                        )
-                        .interpolationMethod(.catmullRom)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                        .opacity(0.9)
-                    }
+            if lowConfidence {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("声検出不足のため、ズレ評価は表示しません")
+                        .font(.subheadline.weight(.semibold))
+                    Text("有効サンプル数が少ない状態では、外音やノイズの誤検出でズレが大きく見えることがあります。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("有効サンプル数: \(vm.sampleCount)（目安: \(minSampleCountForEvaluation)以上）")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(height: 260)
-                .chartYScale(domain: yDomain)
-                .chartXAxisLabel("時間（秒）")
-                .chartYAxisLabel("ズレ（cents）")
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: 10)) { value in
-                        AxisGridLine()
-                        AxisTick()
-                        AxisValueLabel {
-                            if let t = value.as(Double.self) { Text("\(Int(t))") }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+            } else {
+                let raw: [ErrorPlotPoint] = vm.errorPoints
+                    .map { .init(time: $0.time, cents: $0.cents) }
+                    .sorted(by: { $0.time < $1.time })
+                
+                let (plot, xMin, xMax) = makeErrorPlotPoints(
+                    src: raw,
+                    tol: tol,
+                    onlyOut: showOnlyOutOfTol,
+                    maxPoints: maxErrorPlotPoints
+                )
+                
+                let trend: [TrendPoint] = showTrendLine ? makeTrend(points: plot, bins: 80) : []
+                
+                let maxAbs = plot.map { abs($0.cents) }.max() ?? 0
+                let yMax = max(200.0, min(600.0, max(maxAbs * 1.1, tol * 2.0)))
+                let yDomain = (-yMax)...(yMax)
+                
+                if plot.isEmpty {
+                    Text("ズレデータがありません")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Chart {
+                        RectangleMark(
+                            xStart: .value("開始", xMin),
+                            xEnd: .value("終了", xMax),
+                            yStart: .value("下限", -tol),
+                            yEnd: .value("上限", tol)
+                        )
+                        .foregroundStyle(.gray.opacity(0.12))
+                        
+                        RuleMark(y: .value("基準", 0))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                        
+                        RuleMark(y: .value("許容上", tol))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        
+                        RuleMark(y: .value("許容下", -tol))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        
+                        ForEach(plot) { p in
+                            PointMark(
+                                x: .value("時間（秒）", p.time),
+                                y: .value("ズレ（cents）", p.cents)
+                            )
+                            .symbolSize(10)
+                            .opacity(showOnlyOutOfTol ? 0.85 : 0.35)
+                        }
+                        
+                        ForEach(trend) { t in
+                            LineMark(
+                                x: .value("時間（秒）", t.time),
+                                y: .value("平均ズレ（cents）", t.cents)
+                            )
+                            .interpolationMethod(.linear)
+                            .lineStyle(StrokeStyle(lineWidth: 2))
+                            .opacity(0.9)
                         }
                     }
-                }
-                .chartYAxis {
-                    AxisMarks(values: .stride(by: 100)) { value in
-                        AxisGridLine()
-                        AxisTick()
-                        AxisValueLabel {
-                            if let v = value.as(Double.self) { Text("\(Int(v))") }
+                    .frame(height: 260)
+                    .chartYScale(domain: yDomain)
+                    .chartXAxisLabel("時間（秒）")
+                    .chartYAxisLabel("ズレ（cents）")
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: 10)) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel {
+                                if let t = value.as(Double.self) { Text("\(Int(t))") }
+                            }
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks(values: .stride(by: 100)) { value in
+                            AxisGridLine()
+                            AxisTick()
+                            AxisValueLabel {
+                                if let v = value.as(Double.self) { Text("\(Int(v))") }
+                            }
                         }
                     }
                 }
             }
         }
     }
-    
+
     // MARK: - Events preview
     
     private func eventsPreviewSection(_ a: AnalysisResponse) -> some View {

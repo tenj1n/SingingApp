@@ -2,21 +2,21 @@ import Foundation
 
 extension AnalysisAPI {
     
-    /// ユーザ歌声（WAV）をサーバにアップロードして session_id を受け取る
-    /// 例: POST /api/voice/user01?song_id=orpheus
     func uploadUserVoice(userId: String, songId: String, wavFileURL: URL) async throws -> VoiceUploadResponse {
         
-        // /api/voice/{userId} に song_id をクエリで付与
+        // /api/voice/{userId}?song_id=...
         var components = URLComponents(
             url: baseURL.appendingPathComponent("api/voice/\(userId)"),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [
-            URLQueryItem(name: "song_id", value: songId)
-        ]
+        components?.queryItems = [URLQueryItem(name: "song_id", value: songId)]
+        
         guard let endpoint = components?.url else {
             throw URLError(.badURL)
         }
+        
+        print("VOICE UPLOAD URL =", endpoint.absoluteString)
+        print("VOICE UPLOAD file =", wavFileURL.lastPathComponent)
         
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
@@ -24,11 +24,13 @@ extension AnalysisAPI {
         let boundary = "Boundary-\(UUID().uuidString)"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         
-        // 重いファイル読み込みはバックグラウンドで
+        // ファイル読み込み
         let fileData = try await Task.detached(priority: .userInitiated) {
             try Data(contentsOf: wavFileURL)
         }.value
+        print("VOICE UPLOAD bytes =", fileData.count)
         
+        // multipart body
         var body = Data()
         func append(_ s: String) { body.append(Data(s.utf8)) }
         
@@ -43,18 +45,23 @@ extension AnalysisAPI {
         
         let (data, res) = try await URLSession.shared.data(for: req)
         
-        // HTTPステータスチェック
-        if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let text = String(data: data, encoding: .utf8) ?? ""
-            throw URLError(
-                .badServerResponse,
-                userInfo: ["status": http.statusCode, "body": text]
-            )
+        // ✅ ここが最重要：常に出す
+        if let http = res as? HTTPURLResponse {
+            print("VOICE UPLOAD status =", http.statusCode)
+        } else {
+            print("VOICE UPLOAD response = (non-http)")
         }
         
-        // デバッグ用（今は必須）
-        if let raw = String(data: data, encoding: .utf8) {
-            print("UPLOAD RAW RESPONSE:", raw)
+        let text = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+        print("VOICE UPLOAD body =", text)
+        
+        // HTTPステータスチェック（body を含めて投げる）
+        if let http = res as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError(
+                domain: "AnalysisAPI",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(text)"]
+            )
         }
         
         return try JSONDecoder().decode(VoiceUploadResponse.self, from: data)

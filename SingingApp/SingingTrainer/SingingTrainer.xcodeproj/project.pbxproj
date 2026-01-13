@@ -13,10 +13,6 @@
 		04771B902EF7EEED00E70CDB /* RecordVoiceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B8F2EF7EEED00E70CDB /* RecordVoiceViewModel.swift */; };
 		04771B922EF7EF0700E70CDB /* RecordVoiceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B912EF7EF0700E70CDB /* RecordVoiceView.swift */; };
 		04771B9D2EF8014000E70CDB /* KaraokePlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04771B9C2EF8014000E70CDB /* KaraokePlayer.swift */; };
-		04771B9F2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 04771B9E2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a */; };
-		04771BA12EF808A900E70CDB /* songs.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA02EF808A900E70CDB /* songs.json */; };
-		04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA42EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a */; };
-		04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */ = {isa = PBXBuildFile; fileRef = 04771BA82EF809EC00E70CDB /* orpheus_lyrics.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -217,10 +213,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				04771BA92EF809EC00E70CDB /* orpheus_lyrics.json in Resources */,
-				04771B9F2EF804A600E70CDB /* 0005686800.320_no_voice_split_by_lalalai.m4a in Resources */,
-				04771BA12EF808A900E70CDB /* songs.json in Resources */,
-				04771BA52EF8095E00E70CDB /* 0005686800.320_voice_split_by_lalalai.m4a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

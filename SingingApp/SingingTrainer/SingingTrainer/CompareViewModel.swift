@@ -22,6 +22,7 @@ final class CompareViewModel: ObservableObject {
     @Published private(set) var meanAbsCents: Double = 0
     @Published private(set) var score100Strict: Double = 0
     @Published private(set) var score100OctaveInvariant: Double = 0
+    @Published private(set) var sampleCount: Int = 0
     
     // コメント（表示）
     @Published private(set) var commentTitle: String = "コメント"
@@ -31,14 +32,23 @@ final class CompareViewModel: ObservableObject {
     @Published var isAICommentLoading = false
     @Published var aiCommentError: String?
     
-    // 履歴保存（手動）
+    // 履歴保存（手動＝AIコメント用）
     @Published var isHistorySaving = false
     @Published var historySaveError: String?
     @Published private(set) var didGenerateAIComment = false
     @Published private(set) var isHistorySaved = false
-    @Published private(set) var sampleCount: Int = 0
     
     private var lastSessionId: String?
+    
+    // ==================================================
+    // ✅ 自動履歴保存（ルールベース）
+    // ==================================================
+    
+    /// 1セッションにつき1回だけ自動保存するための記録
+    private var autoSavedSessionIds: Set<String> = []
+    
+    /// 声検出が少ないと誤検出で履歴が汚れるので、これ未満は自動保存しない
+    private let minSampleCountForAutoSave = 200
     
     func load(sessionId: String) {
         guard !isLoading else { return }
@@ -46,7 +56,7 @@ final class CompareViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         
-        // ロードし直したら保存状態をリセット
+        // 手動（AI保存）状態のみリセット
         didGenerateAIComment = false
         isHistorySaved = false
         historySaveError = nil
@@ -56,7 +66,7 @@ final class CompareViewModel: ObservableObject {
                 let decoded = try await AnalysisAPI.shared.fetchAnalysis(sessionId: sessionId)
                 self.analysis = decoded
                 self.isLoading = false
-                self.rebuildCaches()
+                self.rebuildCaches() // ← ここで計算完了後に自動保存される
             } catch {
                 self.errorMessage = error.localizedDescription
                 self.isLoading = false
@@ -72,7 +82,6 @@ final class CompareViewModel: ObservableObject {
     func rebuildCaches() {
         guard let a = analysis else { return }
         
-        // ✅ 追加：解析準備中などで track が空のとき、PitchMath に渡さず安全にUIを保つ
         let usrCount = a.usrPitch?.track?.count ?? 0
         let refCount = a.refPitch?.track?.count ?? 0
         if usrCount == 0 || refCount == 0 {
@@ -137,9 +146,64 @@ final class CompareViewModel: ObservableObject {
                 self.score100Strict = strictScore100
                 self.score100OctaveInvariant = octaveScore100
                 
-                // ルールベースのコメント（これはAIではない）
+                // ルールベース（AIではない）
                 self.commentTitle = baseComment.title
                 self.commentBody = baseComment.body
+                
+                // ✅ ここが重要：値が確定した瞬間に自動保存を走らせる（sleep不要）
+                self.autoSaveRuleBasedHistoryIfNeeded()
+            }
+        }
+    }
+    
+    // ==================================================
+    // ✅ 自動履歴保存（ルールベースコメント）
+    // ==================================================
+    private func autoSaveRuleBasedHistoryIfNeeded() {
+        guard let sessionId = lastSessionId else { return }
+        
+        // 同じsessionIdは二重保存しない
+        if autoSavedSessionIds.contains(sessionId) { return }
+        
+        // 評価できるだけの声検出が無いなら自動保存しない
+        guard self.sampleCount >= self.minSampleCountForAutoSave else { return }
+        
+        // ルールコメントが空なら保存しない
+        guard self.commentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return }
+        
+        let autoTitle = "自動保存：解析コメント"
+        
+        let req = HistorySaveRequest(
+            commentTitle: autoTitle,
+            commentBody: self.commentBody,
+            
+            score100: self.score100,
+            score100Strict: self.score100Strict,
+            score100OctaveInvariant: self.score100OctaveInvariant,
+            octaveInvariantNow: self.octaveInvariant,
+            
+            tolCents: (self.analysis?.summary?.tolCents ?? 40.0),
+            percentWithinTol: self.percentWithinTol,
+            meanAbsCents: self.meanAbsCents,
+            sampleCount: self.sampleCount
+        )
+        
+        Task {
+            do {
+                // ✅ source をサーバ側で区別したいなら appendHistory にヘッダ対応を入れる（後述）
+                // 自動保存
+                let res = try await AnalysisAPI.shared.appendHistory(
+                    sessionId: sessionId,
+                    reqBody: req,
+                    commentSource: .rule
+                )
+                if res.ok {
+                    self.autoSavedSessionIds.insert(sessionId)
+                } else {
+                    print("[autoSave] failed:", res.message ?? "(no message)")
+                }
+            } catch {
+                print("[autoSave] error:", error.localizedDescription)
             }
         }
     }
@@ -191,8 +255,7 @@ final class CompareViewModel: ObservableObject {
             )
             
             do {
-                let res = try await AnalysisAPI.shared.fetchAIComment(sessionId: sessionId, req: req)
-                
+                let res = try await AnalysisAPI.shared.fetchAIComment(sessionId: sessionId, reqBody: req)
                 await MainActor.run {
                     if res.ok {
                         self.commentTitle = res.title ?? "AIコメント"
@@ -216,14 +279,14 @@ final class CompareViewModel: ObservableObject {
         }
     }
     
-    // ★追加：ボタン押下時だけ履歴保存
+    // ボタン押下時だけ履歴保存（AIコメント用）
     func saveAICommentToHistory() {
         guard let sessionId = lastSessionId else { return }
         guard !commentBody.isEmpty else { return }
         guard !isHistorySaving else { return }
         
-        // （あなたの方針が「AI生成後のみ保存」なら、これを残してOK）
-        // guard didGenerateAIComment else { return }
+        // ✅ 重要：AI生成してないなら保存しない（ルールベースが混ざるのを防ぐ）
+        guard didGenerateAIComment else { return }
         
         isHistorySaving = true
         historySaveError = nil
@@ -242,20 +305,15 @@ final class CompareViewModel: ObservableObject {
             meanAbsCents: meanAbsCents,
             sampleCount: sampleCount
         )
-        print("=== HistorySaveRequest ===")
-        print("score100:", score100)
-        print("score100Strict:", score100Strict)
-        print("score100OctaveInvariant:", score100OctaveInvariant)
-        print("octaveInvariantNow:", octaveInvariant)
-        print("tolCents:", (analysis?.summary?.tolCents ?? 40.0))
-        print("percentWithinTol:", percentWithinTol)
-        print("meanAbsCents:", meanAbsCents)
-        print("sampleCount:", sampleCount)
-        print("==========================")
         
         Task {
             do {
-                let res = try await AnalysisAPI.shared.appendHistory(sessionId: sessionId, reqBody: req)
+                // AIボタン保存
+                let res = try await AnalysisAPI.shared.appendHistory(
+                    sessionId: sessionId,
+                    reqBody: req,
+                    commentSource: .ai
+                )
                 if res.ok {
                     isHistorySaved = true
                     historySaveError = nil
@@ -270,16 +328,8 @@ final class CompareViewModel: ObservableObject {
         }
     }
     
-    
-    // ズレグラフの表示レンジ
     func errorYDomain(tol: Double) -> ClosedRange<Double> {
         let m = max(200.0, tol * 6.0)
         return (-m)...(m)
-    }
-    
-    private static func splitSongUser(from sessionId: String) -> (String, String) {
-        let parts = sessionId.split(separator: "/").map(String.init)
-        if parts.count >= 2 { return (parts[0], parts[1]) }
-        return ("orphans", "user01")
     }
 }

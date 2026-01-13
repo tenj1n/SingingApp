@@ -11,6 +11,7 @@ import wave
 import math
 import subprocess
 import tempfile
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,38 +45,68 @@ except Exception:
 
 
 # ==================================================
-# Path helpers
+# Utils（共通関数）
 # ==================================================
-def _find_project_root(start: Path) -> Path:
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _sha256(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+# ==================================================
+# Path helpers  ★ここが重要（Fly/ローカル両対応）
+# ==================================================
+BASE_DIR = Path(__file__).resolve().parent  # server.py の場所
+
+
+def _find_analysis_dir() -> Path:
     """
-    どこから実行しても安定して 'SingingApp/analysis' を見つけるために上へ辿る。
-    見つからなければ server.py の2階層上を仮ルートにする。
+    解析用のベースディレクトリ（analysis）を確実に見つける。
+
+    優先順位:
+      1) ENV: ANALYSIS_DIR（絶対推奨。Flyでは /app/analysis を指定すると安定）
+      2) server.py と同階層の ./analysis
+      3) iOSプロジェクト構成: ./SingingApp/analysis（ローカル互換）
+      4) 親を辿って探す（最大8階層）
+      5) fallback: ./analysis を作る
     """
-    cur = start.resolve()
+    env = os.getenv("ANALYSIS_DIR")
+    if env:
+        return Path(env).resolve()
+
+    candidates = [
+        (BASE_DIR / "analysis"),
+        (BASE_DIR / "SingingApp" / "analysis"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c.resolve()
+
+    cur = BASE_DIR.resolve()
     for _ in range(8):
-        if (cur / "SingingApp" / "analysis").exists():
-            return cur
+        c1 = cur / "analysis"
+        if c1.exists():
+            return c1.resolve()
+        c2 = cur / "SingingApp" / "analysis"
+        if c2.exists():
+            return c2.resolve()
         cur = cur.parent
-    # fallback
-    return start.resolve().parent.parent
+
+    # fallback（無ければ作る）
+    return (BASE_DIR / "analysis").resolve()
 
 
-BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = _find_project_root(BASE_DIR)
+ANALYSIS_DIR = _find_analysis_dir()
+SESSIONS_DIR = (ANALYSIS_DIR / "sessions").resolve()
 
-# iOS側のプロジェクト（ある場合）
-PROJECT_DIR = ROOT_DIR / "SingingApp"
-
-# 解析セッション置き場
-ANALYSIS_DIR = PROJECT_DIR / "analysis"
-SESSIONS_DIR = ANALYSIS_DIR / "sessions"
-
-# ★サーバ側の曲カタログ置き場（ここを固定にする）
+# songs フォルダ（サーバ側の曲カタログ置き場）
 SERVER_SONGS_DIR = Path(os.getenv("SERVER_SONGS_DIR", str(ANALYSIS_DIR / "songs"))).resolve()
 SERVER_SONGS_JSON = Path(os.getenv("SERVER_SONGS_JSON", str(SERVER_SONGS_DIR / "songs.json"))).resolve()
 
-# DB
-DB_PATH = (ANALYSIS_DIR / "history.sqlite3").resolve()
+# DB（重要）
+DEFAULT_LOCAL_DB = str((ANALYSIS_DIR / "history.sqlite3").resolve())
+DB_PATH = Path(os.getenv("DB_PATH", DEFAULT_LOCAL_DB)).resolve()
 
 # ensure dirs
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,6 +117,7 @@ SERVER_SONGS_DIR.mkdir(parents=True, exist_ok=True)
 # Flask
 # ==================================================
 app = Flask(__name__)
+app.url_map.strict_slashes = False
 
 
 # ==================================================
@@ -119,6 +151,20 @@ def read_json_or_error(path: Path, label: str) -> Any:
         raise ValueError(f"{label} invalid json: {path} ({e})")
 
 
+@app.get("/api/admin/paths")
+def admin_paths():
+    return jsonify({
+        "ok": True,
+        "BASE_DIR": str(BASE_DIR),
+        "ANALYSIS_DIR": str(ANALYSIS_DIR),
+        "SESSIONS_DIR": str(SESSIONS_DIR),
+        "SERVER_SONGS_DIR": str(SERVER_SONGS_DIR),
+        "SERVER_SONGS_JSON": str(SERVER_SONGS_JSON),
+        "DB_PATH": str(DB_PATH),
+        "songs_json_exists": SERVER_SONGS_JSON.exists(),
+    })
+
+
 # ==================================================
 # Song catalog (SERVER side)
 # ==================================================
@@ -136,15 +182,6 @@ _song_cache_loaded_at: Optional[str] = None
 
 
 def _load_song_catalog_from_server() -> Dict[str, SongItem]:
-    """
-    SERVER_SONGS_JSON を読む。
-    例:
-    {
-      "songs": [
-        {"id":"orpheus","title":"...","instrumental":"xxx.m4a","singer":"yyy.m4a","lyrics":"orpheus_lyrics.json"}
-      ]
-    }
-    """
     global _song_cache_loaded_at
 
     if not SERVER_SONGS_JSON.exists():
@@ -190,15 +227,11 @@ def get_song_or_raise(song_id: str) -> SongItem:
 
 
 def resolve_song_asset_path(filename: str) -> Path:
-    """
-    サーバ側 songs フォルダから参照する。
-    """
     if not filename:
         raise FileNotFoundError("asset filename is empty")
 
     p = (SERVER_SONGS_DIR / filename).resolve()
 
-    # songsフォルダ外へ抜けるのを防止
     if SERVER_SONGS_DIR not in p.parents and p != SERVER_SONGS_DIR:
         raise FileNotFoundError(f"invalid asset path: {filename}")
 
@@ -237,10 +270,6 @@ def make_take_id() -> str:
 
 
 def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -> Path:
-    """
-    sessions/<song_id>/<user_id>/<take_id>/
-    take_id が無ければ最新のフォルダを使う（互換用）。
-    """
     base = (SESSIONS_DIR / song_id / user_id).resolve()
     base.mkdir(parents=True, exist_ok=True)
 
@@ -249,7 +278,6 @@ def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -
         d.mkdir(parents=True, exist_ok=True)
         return d
 
-    # take_id 未指定の場合は「最新っぽい」ものを使う（古いURL互換）
     candidates = [p for p in base.iterdir() if p.is_dir()]
     if not candidates:
         tid = make_take_id()
@@ -262,11 +290,6 @@ def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -
 
 
 def parse_session_id(session_id: str) -> Tuple[str, str, Optional[str]]:
-    """
-    session_id:
-      - 旧: "<song_id>/<user_id>"
-      - 新: "<song_id>/<user_id>/<take_id>"
-    """
     parts = [p for p in session_id.split("/") if p]
     if len(parts) >= 3:
         return parts[0], parts[1], parts[2]
@@ -276,12 +299,27 @@ def parse_session_id(session_id: str) -> Tuple[str, str, Optional[str]]:
 
 
 # ==================================================
-# DB (history)
+# DB (history / users)
 # ==================================================
+def _ensure_db_parent_dir():
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
-        conn = sqlite3.connect(DB_PATH)
+        _ensure_db_parent_dir()
+        conn = sqlite3.connect(
+            str(DB_PATH),
+            timeout=30,
+            check_same_thread=False,
+        )
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         g.db = conn
     return g.db
 
@@ -294,8 +332,27 @@ def close_db(_err):
 
 
 def init_db():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
+    """
+    gunicorn 起動（__main__ じゃない）でも必ず実行されるように、
+    ファイル末尾で init_db() を呼ぶ。
+
+    ここで作るテーブル:
+    - history: 解析結果/コメント/スコア等の履歴
+    - users  : user_id + token_hash を管理（端末なしでも user 発行できるようにする）
+    """
+    _ensure_db_parent_dir()
+    db = sqlite3.connect(
+        str(DB_PATH),
+        timeout=30,
+        check_same_thread=False,
+    )
+    db.execute("PRAGMA journal_mode=WAL;")
+    db.execute("PRAGMA synchronous=NORMAL;")
+    db.execute("PRAGMA busy_timeout=5000;")
+
+    # ------------------------------
+    # history
+    # ------------------------------
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS history (
@@ -328,6 +385,23 @@ def init_db():
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_hash ON history(user_id, client_hash)")
+
+    # ------------------------------
+    # users
+    # ------------------------------
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            token_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_users_token_hash ON users(token_hash)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)")
+
     db.commit()
     db.close()
 
@@ -341,9 +415,6 @@ def require_openai_key_or_error():
 
 
 def _normalize_ai_comment(text: str) -> Tuple[str, str]:
-    """
-    AIがJSON以外を返しても最低限表示できるように救済。
-    """
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
@@ -355,7 +426,6 @@ def _normalize_ai_comment(text: str) -> Tuple[str, str]:
     except Exception:
         pass
 
-    # fallback
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         return "AIコメント", "（本文が空でした）"
@@ -373,10 +443,6 @@ def _which(cmd: str) -> Optional[str]:
 
 
 def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
-    """
-    m4a 等を ffmpeg で wav(PCM16) に変換して一時ファイルとして返す。
-    ffmpeg が無い場合は例外。
-    """
     ffmpeg = _which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError(
@@ -388,7 +454,6 @@ def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
     tmp_path = Path(tmp.name)
     tmp.close()
 
-    # -vn: no video, -ac 1 mono, -ar 44100
     cmd = [
         ffmpeg, "-y",
         "-i", str(src_path),
@@ -405,9 +470,6 @@ def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
 
 
 def _read_wav_mono_float(path: Path) -> Tuple[np.ndarray, int]:
-    """
-    wav を読み、mono float32(-1..1) と sr を返す（標準 wave のみ）。
-    """
     with wave.open(str(path), "rb") as wf:
         nch = wf.getnchannels()
         sr = wf.getframerate()
@@ -429,9 +491,6 @@ def _read_wav_mono_float(path: Path) -> Tuple[np.ndarray, int]:
 
 
 def load_audio_mono_float(path: Path) -> Tuple[np.ndarray, int]:
-    """
-    wav は標準で読む。m4a 等は ffmpeg があれば wav に変換して読む。
-    """
     ext = path.suffix.lower()
     if ext == ".wav":
         return _read_wav_mono_float(path)
@@ -447,9 +506,6 @@ def load_audio_mono_float(path: Path) -> Tuple[np.ndarray, int]:
 
 
 def _parabolic_interpolation(y0: float, y1: float, y2: float) -> float:
-    """
-    3点の放物線補間でピーク位置の微調整を返す（-0.5..0.5程度）。
-    """
     denom = (y0 - 2.0 * y1 + y2)
     if abs(denom) < 1e-12:
         return 0.0
@@ -465,14 +521,6 @@ def extract_pitch_track_fft(
     energy_th: float = PITCH_ENERGY_TH,
     max_seconds: float = PITCH_MAX_SECONDS,
 ) -> List[Dict[str, Any]]:
-    """
-    超簡易 pitch 抽出：
-    - hop ごとに frame を切る（frame_len = 2*hop）
-    - ハミング窓 + rfft
-    - fmin..fmax の最大ピークを f0 とする
-    - 無声音は f0_hz = null
-    返り値は [{"t": sec, "f0_hz": float|None}, ...]
-    """
     if x.size == 0 or sr <= 0:
         return []
 
@@ -485,7 +533,6 @@ def extract_pitch_track_fft(
         frame_len = 256
 
     win = np.hamming(frame_len).astype(np.float32)
-
     freqs = np.fft.rfftfreq(frame_len, d=1.0 / sr)
 
     band = (freqs >= fmin) & (freqs <= fmax)
@@ -496,7 +543,6 @@ def extract_pitch_track_fft(
     out: List[Dict[str, Any]] = []
     n = x.size
 
-    # 末尾まで拾うために range の上限を n-frame_len + 1 にする
     for start in range(0, max(0, n - frame_len + 1), hop):
         frame = x[start:start + frame_len]
         if frame.size != frame_len:
@@ -535,25 +581,16 @@ def extract_pitch_track_fft(
     return out
 
 
-# ref pitch cache（曲ごとに一度だけ作る）
 _ref_pitch_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
     x, sr = load_audio_mono_float(path)
     track = extract_pitch_track_fft(x, sr, hop=PITCH_HOP)
-    return {
-        "algo": "fft_peak",
-        "sr": int(sr),
-        "hop": int(PITCH_HOP),
-        "track": track,
-    }
+    return {"algo": "fft_peak", "sr": int(sr), "hop": int(PITCH_HOP), "track": track}
 
 
 def get_ref_pitch_for_song(song: SongItem) -> Dict[str, Any]:
-    """
-    singer 音源から ref pitch を作る（キャッシュ）。
-    """
     if song.id in _ref_pitch_cache:
         return _ref_pitch_cache[song.id]
 
@@ -568,14 +605,9 @@ def get_ref_pitch_for_song(song: SongItem) -> Dict[str, Any]:
 # Core analysis (FFT version)
 # ==================================================
 def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dict[str, Any]:
-    """
-    FFTで usr/ref の pitch track を作って返す（最小構成）。
-    events はまだ無し。
-    """
     try:
         song = get_song_or_raise(song_id)
 
-        # existence check
         _ = resolve_song_asset_path(song.instrumental)
         _ = resolve_song_asset_path(song.singer)
         _ = resolve_song_asset_path(song.lyrics)
@@ -616,10 +648,7 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 "tips": tips,
                 "tol_cents": 40.0,
             },
-            "meta": {
-                "paths": {},
-                "counts": {"events": 0, "ref_track": ref_n, "usr_track": usr_n},
-            },
+            "meta": {"paths": {}, "counts": {"events": 0, "ref_track": ref_n, "usr_track": usr_n}},
         }
 
     except Exception as e:
@@ -641,11 +670,41 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 ],
                 "tol_cents": 40.0,
             },
-            "meta": {
-                "paths": {},
-                "counts": {"events": 0, "ref_track": 0, "usr_track": 0},
-            },
+            "meta": {"paths": {}, "counts": {"events": 0, "ref_track": 0, "usr_track": 0}},
         }
+
+
+# ==================================================
+# API: create user (issue user_id + token)
+# POST /api/users
+# ==================================================
+@app.post("/api/users")
+def create_user():
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get("name") or "").strip()
+
+        user_id = uuid.uuid4().hex
+        token = secrets.token_urlsafe(32)
+        token_hash = _sha256(token)
+
+        db = get_db()
+        db.execute(
+            "INSERT INTO users (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, name, token_hash, _now_iso())
+        )
+        db.commit()
+
+        return jsonify({
+            "ok": True,
+            "message": "user_created",
+            "user_id": user_id,
+            "token": token,
+            "name": name,
+        })
+
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
 
 
 # ==================================================
@@ -654,12 +713,6 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
 # ==================================================
 @app.post("/api/voice/<user_id>")
 def upload_voice(user_id: str):
-    """
-    multipart form-data:
-      - file: wav
-    query:
-      - song_id (required ideally)
-    """
     try:
         song_id = (request.args.get("song_id") or "").strip()
         if not song_id:
@@ -752,11 +805,6 @@ def get_analysis(session_id: str):
 # AI comment (core + compat routes)
 # ==================================================
 def _ai_comment_core(song_id: str, user_id: str, take_id: Optional[str]):
-    """
-    /api/comment の本体処理を共通化
-    - take_id があればそのセッション
-    - 無ければ最新（互換）
-    """
     require_openai_key_or_error()
 
     sess_dir = get_session_dir(song_id, user_id, take_id)
@@ -856,7 +904,6 @@ def _ai_comment_core(song_id: str, user_id: str, take_id: Optional[str]):
     })
 
 
-# 旧: /api/comment/<song_id>/<user_id> （最新セッション）
 @app.post("/api/comment/<song_id>/<user_id>")
 def ai_comment(song_id: str, user_id: str):
     try:
@@ -867,7 +914,6 @@ def ai_comment(song_id: str, user_id: str):
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# 新: /api/comment/<song_id>/<user_id>/<take_id> （指定セッション）
 @app.post("/api/comment/<song_id>/<user_id>/<take_id>")
 def ai_comment_with_take(song_id: str, user_id: str, take_id: str):
     try:
@@ -878,7 +924,6 @@ def ai_comment_with_take(song_id: str, user_id: str, take_id: str):
         return json_error(500, "INTERNAL_ERROR", str(e))
 
 
-# 保険: /api/comment/<path:session_id> （orpheus/user01/xxxx をそのまま渡す）
 @app.post("/api/comment/<path:session_id>")
 def ai_comment_by_session(session_id: str):
     try:
@@ -1066,20 +1111,33 @@ def history_delete(user_id: str, history_id: str):
 
 
 # ==================================================
-# Main
+# 起動時に必ず DB を初期化（gunicorn 対応）
+# ==================================================
+init_db()
+
+# 曲カタログは必須ではないので、起動時に失敗してもアプリは落とさない
+try:
+    get_song_catalog(force_reload=True)
+except Exception:
+    pass
+
+
+# ==================================================
+# Main（ローカル用）
 # ==================================================
 if __name__ == "__main__":
-    init_db()
     try:
-        get_song_catalog(force_reload=True)
-        print("✅ SERVER_SONGS_DIR =", SERVER_SONGS_DIR)
-        print("✅ SERVER_SONGS_JSON =", SERVER_SONGS_JSON)
-        print("✅ song_ids =", list(_song_cache.keys()))
-        print("✅ FFT pitch: hop =", PITCH_HOP, "fmin =", PITCH_FMIN, "fmax =", PITCH_FMAX)
-        print("✅ ffmpeg =", _which("ffmpeg"))
-    except Exception as e:
-        print("⚠️ song catalog load failed:", e)
-        print("   SERVER_SONGS_DIR =", SERVER_SONGS_DIR)
-        print("   SERVER_SONGS_JSON =", SERVER_SONGS_JSON)
+        print("BASE_DIR =", str(BASE_DIR))
+        print("ANALYSIS_DIR =", str(ANALYSIS_DIR))
+        print("SESSIONS_DIR =", str(SESSIONS_DIR))
+        print("SERVER_SONGS_DIR =", str(SERVER_SONGS_DIR))
+        print("SERVER_SONGS_JSON =", str(SERVER_SONGS_JSON), "exists=", SERVER_SONGS_JSON.exists())
+        print("DB_PATH =", str(DB_PATH))
+        print("FFT pitch: hop =", PITCH_HOP, "fmin =", PITCH_FMIN, "fmax =", PITCH_FMAX)
+        print("ffmpeg =", _which("ffmpeg"))
+        if _song_cache:
+            print("song_ids =", list(_song_cache.keys()))
+    except Exception:
+        pass
 
     app.run(host="0.0.0.0", port=5000, debug=True)

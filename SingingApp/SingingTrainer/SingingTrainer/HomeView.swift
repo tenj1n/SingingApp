@@ -25,7 +25,7 @@ struct HomeView: View {
                             accent: .red,
                             isEnabled: hasUserId
                         ) {
-                            RecordVoiceView()
+                            RecordEntryView()
                         }
                         
                         // 履歴

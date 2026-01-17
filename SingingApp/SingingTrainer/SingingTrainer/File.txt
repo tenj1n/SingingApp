@@ -1,0 +1,9 @@
+NavCard(
+    title: "録音して解析",
+    subtitle: "1曲録音してピッチを可視化",
+    systemImage: "mic.fill",
+    accent: .red,
+    isEnabled: hasUserId
+) {
+    RecordEntryView(userId: userSession.userId!)
+}

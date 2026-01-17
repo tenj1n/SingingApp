@@ -26,14 +26,21 @@ from flask import Flask, request, jsonify, g
 AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "gpt-4.1-mini")
 PROMPT_VERSION_DEFAULT = os.getenv("PROMPT_VERSION_DEFAULT", "v1")
 
-# Pitch extraction config (FFT)
-PITCH_HOP = int(os.getenv("PITCH_HOP", "2048"))
-PITCH_FMIN = float(os.getenv("PITCH_FMIN", "80.0"))      # Hz
-PITCH_FMAX = float(os.getenv("PITCH_FMAX", "1000.0"))    # Hz
-PITCH_ENERGY_TH = float(os.getenv("PITCH_ENERGY_TH", "0.01"))  # RMS threshold (rough)
-PITCH_MAX_SECONDS = float(os.getenv("PITCH_MAX_SECONDS", "60.0"))  # safety cap
+# Pitch extraction config
+PITCH_HOP = int(os.getenv("PITCH_HOP", "2048"))                 # 512/1024/2048/4096 を調整
+PITCH_FRAME_LEN = int(os.getenv("PITCH_FRAME_LEN", "4096"))    # 2048〜4096
+PITCH_FMIN = float(os.getenv("PITCH_FMIN", "65.0"))
+PITCH_FMAX = float(os.getenv("PITCH_FMAX", "1000.0"))
+PITCH_ENERGY_TH = float(os.getenv("PITCH_ENERGY_TH", "0.00002"))
+PITCH_MAX_SECONDS = float(os.getenv("PITCH_MAX_SECONDS", "400.0"))
 
+# アルゴ切替
+PITCH_ALGO = os.getenv("PITCH_ALGO", "yin")  # "yin" or "fft_peak" or "librosa_pyin"
+YIN_THRESHOLD = float(os.getenv("YIN_THRESHOLD", "0.45"))
+
+# ==================================================
 # OpenAI (optional)
+# ==================================================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = None
 try:
@@ -42,7 +49,6 @@ try:
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception:
     openai_client = None
-
 
 # ==================================================
 # Utils（共通関数）
@@ -53,19 +59,91 @@ def _now_iso() -> str:
 def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
+def iso_utc_z() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def safe_len(x: Any) -> Optional[int]:
+    try:
+        return len(x)
+    except Exception:
+        return None
+
+def json_error(status: int, code: str, message: str, **extra):
+    payload = {"ok": False, "code": code, "message": message}
+    if extra:
+        payload.update(extra)
+    return jsonify(payload), status
+
+def read_json_or_error(path: Path, label: str) -> Any:
+    if not path.exists():
+        raise FileNotFoundError(f"{label} not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except Exception as e:
+        raise ValueError(f"{label} invalid json: {path} ({e})")
+
+def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
+    """
+    途中で落ちても壊れたファイルを残しにくいように、tmpに書いてから置き換える。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp_{uuid.uuid4().hex[:8]}")
+    tmp.write_text(text, encoding=encoding)
+    tmp.replace(path)
+
+def atomic_write_json(path: Path, obj: Any) -> None:
+    atomic_write_text(path, json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+
+def status_path(sess_dir: Path) -> Path:
+    return sess_dir / "status.json"
+
+def set_status(sess_dir: Path, state: str, message: str = "", **extra) -> Dict[str, Any]:
+    """
+    セッション状態を書き込む（queued / running / done / error / unknown）
+    """
+    sess_dir.mkdir(parents=True, exist_ok=True)
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "state": state,
+        "message": message,
+        "updated_at": iso_utc_z(),
+    }
+    if extra:
+        payload.update(extra)
+
+    # ✅ atomic write で status.json を更新
+    atomic_write_json(status_path(sess_dir), payload)
+    return payload
+
+def get_status(sess_dir: Path) -> Optional[Dict[str, Any]]:
+    """
+    status.json を読む。無ければ None。壊れていれば unknown 扱い。
+    """
+    p = status_path(sess_dir)
+    if not p.exists():
+        return None
+    try:
+        return read_json_or_error(p, "status")
+    except Exception:
+        return {
+            "ok": True,
+            "state": "unknown",
+            "message": "status.json invalid",
+            "updated_at": iso_utc_z(),
+        }
 
 # ==================================================
 # Path helpers  ★ここが重要（Fly/ローカル両対応）
 # ==================================================
 BASE_DIR = Path(__file__).resolve().parent  # server.py の場所
 
-
 def _find_analysis_dir() -> Path:
     """
     解析用のベースディレクトリ（analysis）を確実に見つける。
 
     優先順位:
-      1) ENV: ANALYSIS_DIR（絶対推奨。Flyでは /app/analysis を指定すると安定）
+      1) ENV: ANALYSIS_DIR
       2) server.py と同階層の ./analysis
       3) iOSプロジェクト構成: ./SingingApp/analysis（ローカル互換）
       4) 親を辿って探す（最大8階層）
@@ -93,9 +171,7 @@ def _find_analysis_dir() -> Path:
             return c2.resolve()
         cur = cur.parent
 
-    # fallback（無ければ作る）
     return (BASE_DIR / "analysis").resolve()
-
 
 ANALYSIS_DIR = _find_analysis_dir()
 SESSIONS_DIR = (ANALYSIS_DIR / "sessions").resolve()
@@ -112,45 +188,15 @@ DB_PATH = Path(os.getenv("DB_PATH", DEFAULT_LOCAL_DB)).resolve()
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 SERVER_SONGS_DIR.mkdir(parents=True, exist_ok=True)
 
-
 # ==================================================
 # Flask
 # ==================================================
 app = Flask(__name__)
 app.url_map.strict_slashes = False
 
-
 # ==================================================
-# Utils
+# Admin
 # ==================================================
-def iso_utc_z() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def safe_len(x: Any) -> Optional[int]:
-    try:
-        return len(x)
-    except Exception:
-        return None
-
-
-def json_error(status: int, code: str, message: str, **extra):
-    payload = {"ok": False, "code": code, "message": message}
-    if extra:
-        payload.update(extra)
-    return jsonify(payload), status
-
-
-def read_json_or_error(path: Path, label: str) -> Any:
-    if not path.exists():
-        raise FileNotFoundError(f"{label} not found: {path}")
-    text = path.read_text(encoding="utf-8")
-    try:
-        return json.loads(text)
-    except Exception as e:
-        raise ValueError(f"{label} invalid json: {path} ({e})")
-
-
 @app.get("/api/admin/paths")
 def admin_paths():
     return jsonify({
@@ -164,7 +210,6 @@ def admin_paths():
         "songs_json_exists": SERVER_SONGS_JSON.exists(),
     })
 
-
 # ==================================================
 # Song catalog (SERVER side)
 # ==================================================
@@ -176,10 +221,8 @@ class SongItem:
     singer: str
     lyrics: str
 
-
 _song_cache: Dict[str, SongItem] = {}
 _song_cache_loaded_at: Optional[str] = None
-
 
 def _load_song_catalog_from_server() -> Dict[str, SongItem]:
     global _song_cache_loaded_at
@@ -211,20 +254,17 @@ def _load_song_catalog_from_server() -> Dict[str, SongItem]:
     _song_cache_loaded_at = iso_utc_z()
     return out
 
-
 def get_song_catalog(force_reload: bool = False) -> Dict[str, SongItem]:
     global _song_cache
     if force_reload or not _song_cache:
         _song_cache = _load_song_catalog_from_server()
     return _song_cache
 
-
 def get_song_or_raise(song_id: str) -> SongItem:
     catalog = get_song_catalog()
     if song_id not in catalog:
         raise FileNotFoundError(f"song_id not found in catalog: {song_id} (catalog={list(catalog.keys())})")
     return catalog[song_id]
-
 
 def resolve_song_asset_path(filename: str) -> Path:
     if not filename:
@@ -238,7 +278,6 @@ def resolve_song_asset_path(filename: str) -> Path:
     if not p.exists():
         raise FileNotFoundError(f"asset not found: {p}")
     return p
-
 
 @app.get("/api/admin/songs/reload")
 def admin_reload_songs():
@@ -261,13 +300,11 @@ def admin_reload_songs():
             songs_dir=str(SERVER_SONGS_DIR),
         )
 
-
 # ==================================================
 # Session dir
 # ==================================================
 def make_take_id() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-
 
 def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -> Path:
     base = (SESSIONS_DIR / song_id / user_id).resolve()
@@ -288,7 +325,6 @@ def get_session_dir(song_id: str, user_id: str, take_id: Optional[str] = None) -
     candidates.sort(key=lambda p: p.name, reverse=True)
     return candidates[0]
 
-
 def parse_session_id(session_id: str) -> Tuple[str, str, Optional[str]]:
     parts = [p for p in session_id.split("/") if p]
     if len(parts) >= 3:
@@ -297,6 +333,45 @@ def parse_session_id(session_id: str) -> Tuple[str, str, Optional[str]]:
         return parts[0], parts[1], None
     raise ValueError(f"invalid session_id: {session_id}")
 
+def session_paths(sess_dir: Path) -> Dict[str, Path]:
+    return {
+        "input_wav": sess_dir / "input.wav",
+        "usr_pitch": sess_dir / "usr_pitch.json",
+        "ref_pitch": sess_dir / "ref_pitch.json",
+        "events": sess_dir / "events.json",
+        "summary": sess_dir / "summary.json",
+        "status": sess_dir / "status.json",
+    }
+
+def set_status(sess_dir: Path, state: str, message: str = "", **extra) -> None:
+    p = session_paths(sess_dir)["status"]
+    payload = {
+        "ok": True,
+        "state": state,           # queued / running / done / error
+        "message": message,
+        "updated_at": iso_utc_z(),
+    }
+    if extra:
+        payload.update(extra)
+    atomic_write_json(p, payload)
+
+def get_status(sess_dir: Path) -> Optional[Dict[str, Any]]:
+    p = session_paths(sess_dir)["status"]
+    if not p.exists():
+        return None
+    try:
+        return read_json_or_error(p, "status")
+    except Exception:
+        return None
+
+def analysis_outputs_exist(sess_dir: Path) -> bool:
+    paths = session_paths(sess_dir)
+    return (
+        paths["usr_pitch"].exists()
+        and paths["ref_pitch"].exists()
+        and paths["events"].exists()
+        and paths["summary"].exists()
+    )
 
 # ==================================================
 # DB (history / users)
@@ -306,7 +381,6 @@ def _ensure_db_parent_dir():
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-
 
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
@@ -323,23 +397,13 @@ def get_db() -> sqlite3.Connection:
         g.db = conn
     return g.db
 
-
 @app.teardown_appcontext
 def close_db(_err):
     db = g.pop("db", None)
     if db is not None:
         db.close()
 
-
 def init_db():
-    """
-    gunicorn 起動（__main__ じゃない）でも必ず実行されるように、
-    ファイル末尾で init_db() を呼ぶ。
-
-    ここで作るテーブル:
-    - history: 解析結果/コメント/スコア等の履歴
-    - users  : user_id + token_hash を管理（端末なしでも user 発行できるようにする）
-    """
     _ensure_db_parent_dir()
     db = sqlite3.connect(
         str(DB_PATH),
@@ -350,9 +414,6 @@ def init_db():
     db.execute("PRAGMA synchronous=NORMAL;")
     db.execute("PRAGMA busy_timeout=5000;")
 
-    # ------------------------------
-    # history
-    # ------------------------------
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS history (
@@ -386,9 +447,6 @@ def init_db():
     db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_created ON history(user_id, created_at)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_history_user_hash ON history(user_id, client_hash)")
 
-    # ------------------------------
-    # users
-    # ------------------------------
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -405,14 +463,12 @@ def init_db():
     db.commit()
     db.close()
 
-
 # ==================================================
 # OpenAI helpers
 # ==================================================
 def require_openai_key_or_error():
     if openai_client is None:
         raise RuntimeError("OPENAI_API_KEY is not set or OpenAI client failed to initialize.")
-
 
 def _normalize_ai_comment(text: str) -> Tuple[str, str]:
     try:
@@ -433,14 +489,12 @@ def _normalize_ai_comment(text: str) -> Tuple[str, str]:
     body = "\n".join(lines[1:6]) if len(lines) > 1 else "（本文が空でした）"
     return title, body
 
-
 # ==================================================
-# Audio decode + FFT pitch
+# Audio decode + pitch
 # ==================================================
 def _which(cmd: str) -> Optional[str]:
     from shutil import which
     return which(cmd)
-
 
 def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
     ffmpeg = _which("ffmpeg")
@@ -468,7 +522,6 @@ def _decode_to_wav_via_ffmpeg(src_path: Path) -> Path:
         raise RuntimeError(f"ffmpeg 変換に失敗しました: {p.stderr[:400]}")
     return tmp_path
 
-
 def _read_wav_mono_float(path: Path) -> Tuple[np.ndarray, int]:
     with wave.open(str(path), "rb") as wf:
         nch = wf.getnchannels()
@@ -489,7 +542,6 @@ def _read_wav_mono_float(path: Path) -> Tuple[np.ndarray, int]:
 
     return x, int(sr)
 
-
 def load_audio_mono_float(path: Path) -> Tuple[np.ndarray, int]:
     ext = path.suffix.lower()
     if ext == ".wav":
@@ -504,13 +556,11 @@ def load_audio_mono_float(path: Path) -> Tuple[np.ndarray, int]:
         except Exception:
             pass
 
-
 def _parabolic_interpolation(y0: float, y1: float, y2: float) -> float:
     denom = (y0 - 2.0 * y1 + y2)
     if abs(denom) < 1e-12:
         return 0.0
     return 0.5 * (y0 - y2) / denom
-
 
 def extract_pitch_track_fft(
     x: np.ndarray,
@@ -580,31 +630,235 @@ def extract_pitch_track_fft(
 
     return out
 
-
+# ---- YIN (自前) ※重いので hop/frame_len/max_seconds で必ず抑える ----
 _ref_pitch_cache: Dict[str, Dict[str, Any]] = {}
 
+def _yin_difference(x: np.ndarray, max_tau: int) -> np.ndarray:
+    x = x.astype(np.float32)
+    d = np.zeros(max_tau + 1, dtype=np.float32)
+    for tau in range(1, max_tau + 1):
+        diff = x[:-tau] - x[tau:]
+        d[tau] = np.sum(diff * diff)
+    return d
+
+def _yin_cmn(d: np.ndarray) -> np.ndarray:
+    cmn = np.zeros_like(d, dtype=np.float32)
+    cmn[0] = 1.0
+    running_sum = 0.0
+    for tau in range(1, d.size):
+        running_sum += float(d[tau])
+        cmn[tau] = d[tau] * tau / (running_sum + 1e-12)
+    return cmn
+
+def _yin_pick_tau(cmn: np.ndarray, threshold: float, tau_min: int, tau_max: int) -> Optional[int]:
+    tau_max = min(tau_max, cmn.size - 1)
+    for tau in range(max(2, tau_min), tau_max):
+        if cmn[tau] < threshold:
+            while tau + 1 <= tau_max and cmn[tau + 1] < cmn[tau]:
+                tau += 1
+            return tau
+    return None
+
+def _parabolic_interpolation_1d(y: np.ndarray, i: int) -> float:
+    if i <= 0 or i >= y.size - 1:
+        return 0.0
+    y0, y1, y2 = float(y[i - 1]), float(y[i]), float(y[i + 1])
+    denom = (y0 - 2.0 * y1 + y2)
+    if abs(denom) < 1e-12:
+        return 0.0
+    return 0.5 * (y0 - y2) / denom
+
+def extract_pitch_track_yin(
+    x: np.ndarray,
+    sr: int,
+    hop: int,
+    frame_len: int,
+    fmin: float,
+    fmax: float,
+    energy_th: float,
+    yin_threshold: float,
+    max_seconds: float,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    if x.size == 0 or sr <= 0:
+        return [], {"frames": 0}
+
+    max_n = int(sr * max_seconds)
+    if x.size > max_n:
+        x = x[:max_n]
+
+    tau_min = max(2, int(sr / fmax))
+    tau_max = max(tau_min + 1, int(sr / fmin))
+
+    win = np.hamming(frame_len).astype(np.float32)
+
+    out: List[Dict[str, Any]] = []
+    n = x.size
+
+    frames = 0
+    rms_drop = 0
+    tau_none = 0
+    voiced = 0
+
+    for start in range(0, max(0, n - frame_len + 1), hop):
+        frame = x[start:start + frame_len]
+        if frame.size != frame_len:
+            break
+
+        frames += 1
+        rms = float(np.sqrt(np.mean(frame * frame)))
+        t = float(start) / float(sr)
+
+        if rms < energy_th:
+            rms_drop += 1
+            out.append({"t": t, "f0_hz": None})
+            continue
+
+        frame_w = (frame * win).astype(np.float32)
+
+        d = _yin_difference(frame_w, tau_max)
+        cmn = _yin_cmn(d)
+        tau = _yin_pick_tau(cmn, yin_threshold, tau_min, tau_max)
+        if tau is None:
+            tau_none += 1
+            out.append({"t": t, "f0_hz": None})
+            continue
+
+        dtau = _parabolic_interpolation_1d(cmn, tau)
+        tau_refined = float(tau) + float(dtau)
+
+        if tau_refined <= 0:
+            tau_none += 1
+            out.append({"t": t, "f0_hz": None})
+            continue
+
+        f0 = float(sr / tau_refined)
+        if not (fmin <= f0 <= fmax) or math.isnan(f0) or math.isinf(f0):
+            tau_none += 1
+            out.append({"t": t, "f0_hz": None})
+        else:
+            voiced += 1
+            out.append({"t": t, "f0_hz": f0})
+
+    meta = {
+        "frames": frames,
+        "voiced": voiced,
+        "rms_drop": rms_drop,
+        "tau_none": tau_none,
+        "energy_th": float(energy_th),
+        "yin_threshold": float(yin_threshold),
+        "hop": int(hop),
+        "frame_len": int(frame_len),
+        "fmin": float(fmin),
+        "fmax": float(fmax),
+    }
+    return out, meta
+
+def _build_pitch_track_librosa_pyin(path: Path) -> Dict[str, Any]:
+    """
+    librosa が入っている環境なら pyin を使う（高速・実績あり）。
+    入ってなければ例外を投げる。
+    """
+    import librosa  # noqa
+
+    x, sr = load_audio_mono_float(path)
+    max_n = int(sr * PITCH_MAX_SECONDS)
+    if x.size > max_n:
+        x = x[:max_n]
+
+    # librosa は float64 を好む
+    y = x.astype(np.float32)
+
+    f0, voiced_flag, voiced_prob = librosa.pyin(
+        y=y,
+        fmin=float(PITCH_FMIN),
+        fmax=float(PITCH_FMAX),
+        sr=int(sr),
+        frame_length=int(PITCH_FRAME_LEN),
+        hop_length=int(PITCH_HOP),
+        center=False,
+    )
+
+    track: List[Dict[str, Any]] = []
+    if f0 is None:
+        return {"algo": "librosa_pyin", "sr": int(sr), "hop": int(PITCH_HOP), "frame_len": int(PITCH_FRAME_LEN), "track": []}
+
+    for i in range(len(f0)):
+        t = float(i * PITCH_HOP) / float(sr)
+        if voiced_flag is not None and i < len(voiced_flag) and not bool(voiced_flag[i]):
+            track.append({"t": t, "f0_hz": None})
+            continue
+        v = f0[i]
+        if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+            track.append({"t": t, "f0_hz": None})
+        else:
+            track.append({"t": t, "f0_hz": float(v)})
+
+    return {
+        "algo": "librosa_pyin",
+        "sr": int(sr),
+        "hop": int(PITCH_HOP),
+        "frame_len": int(PITCH_FRAME_LEN),
+        "track": track,
+    }
 
 def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
-    x, sr = load_audio_mono_float(path)
-    track = extract_pitch_track_fft(x, sr, hop=PITCH_HOP)
-    return {"algo": "fft_peak", "sr": int(sr), "hop": int(PITCH_HOP), "track": track}
+    algo = (PITCH_ALGO or "").lower().strip()
 
+    if algo == "librosa_pyin":
+        return _build_pitch_track_librosa_pyin(path)
+
+    x, sr = load_audio_mono_float(path)
+
+    if algo == "yin":
+        track = extract_pitch_track_yin(
+            x=x,
+            sr=sr,
+            hop=PITCH_HOP,
+            frame_len=PITCH_FRAME_LEN,
+            fmin=PITCH_FMIN,
+            fmax=PITCH_FMAX,
+            energy_th=PITCH_ENERGY_TH,
+            yin_threshold=YIN_THRESHOLD,
+            max_seconds=PITCH_MAX_SECONDS,
+        )
+
+        voiced = 0
+        for p in track:
+            if isinstance(p, dict) and p.get("f0_hz") is not None:
+                voiced += 1
+
+        return {
+            "algo": "yin",
+            "sr": int(sr),
+            "hop": int(PITCH_HOP),
+            "frame_len": int(PITCH_FRAME_LEN),
+            "track": track,
+            "debug": {
+                "frames": len(track),
+                "voiced": voiced,
+                "energy_th": float(PITCH_ENERGY_TH),
+                "yin_threshold": float(YIN_THRESHOLD),
+                "fmin": float(PITCH_FMIN),
+                "fmax": float(PITCH_FMAX),
+            },
+        }
 
 def get_ref_pitch_for_song(song: SongItem) -> Dict[str, Any]:
     if song.id in _ref_pitch_cache:
         return _ref_pitch_cache[song.id]
-
     singer_path = resolve_song_asset_path(song.singer)
     ref_pitch = build_pitch_track_from_file(singer_path)
-
     _ref_pitch_cache[song.id] = ref_pitch
     return ref_pitch
 
-
 # ==================================================
-# Core analysis (FFT version)
+# Core analysis
 # ==================================================
 def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dict[str, Any]:
+    """
+    解析のコア。
+    ここは「例外を握りつぶさず」ok=False で返す（API側で status/summary を残せるようにする）。
+    """
     try:
         song = get_song_or_raise(song_id)
 
@@ -625,6 +879,7 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 "短いフレーズで録音してみてください。",
                 "参照音源が再生できる形式か確認してください（m4aの場合はffmpegが必要なことがあります）。",
             ]
+            ok = False
         else:
             verdict = "解析完了"
             reason = "音程データを作成しました。"
@@ -632,9 +887,10 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 "ズレが大きい区間を短く区切って繰り返し練習してください。",
                 "出だしの音を狙ってから声を出すと安定しやすいです。",
             ]
+            ok = True
 
         return {
-            "ok": True,
+            "ok": ok,
             "song_id": song_id,
             "user_id": user_id,
             "take_id": take_id,
@@ -648,12 +904,19 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 "tips": tips,
                 "tol_cents": 40.0,
             },
-            "meta": {"paths": {}, "counts": {"events": 0, "ref_track": ref_n, "usr_track": usr_n}},
+            "meta": {
+                "paths": {},
+                "counts": {"events": 0, "ref_track": ref_n, "usr_track": usr_n},
+                "algo": PITCH_ALGO,
+                "hop": PITCH_HOP,
+                "frame_len": PITCH_FRAME_LEN,
+                "max_seconds": PITCH_MAX_SECONDS,
+            },
         }
 
     except Exception as e:
         return {
-            "ok": True,
+            "ok": False,
             "song_id": song_id,
             "user_id": user_id,
             "take_id": take_id,
@@ -667,12 +930,19 @@ def analyze_fft(song_id: str, user_id: str, take_id: str, wav_path: Path) -> Dic
                 "tips": [
                     "song_id が正しいか確認してください。",
                     "参照音源の配置とファイル形式を確認してください（m4aはffmpegが必要）。",
+                    "PITCH_ALGO=librosa_pyin の場合はサーバに librosa が入っているか確認してください。",
                 ],
                 "tol_cents": 40.0,
             },
-            "meta": {"paths": {}, "counts": {"events": 0, "ref_track": 0, "usr_track": 0}},
+            "meta": {
+                "paths": {},
+                "counts": {"events": 0, "ref_track": 0, "usr_track": 0},
+                "algo": PITCH_ALGO,
+                "hop": PITCH_HOP,
+                "frame_len": PITCH_FRAME_LEN,
+                "max_seconds": PITCH_MAX_SECONDS,
+            },
         }
-
 
 # ==================================================
 # API: create user (issue user_id + token)
@@ -706,17 +976,14 @@ def create_user():
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
-
 # ==================================================
-# API: upload voice
+# API: upload voice (UPLOAD ONLY)
 # POST /api/voice/<user_id>?song_id=xxx
 # ==================================================
 @app.post("/api/voice/<user_id>")
 def upload_voice(user_id: str):
     try:
-        song_id = (request.args.get("song_id") or "").strip()
-        if not song_id:
-            song_id = "orphans"
+        song_id = (request.args.get("song_id") or "").strip() or "orphans"
 
         up = request.files.get("file")
         if up is None:
@@ -728,18 +995,13 @@ def upload_voice(user_id: str):
 
         up.save(wav_path)
 
-        analysis = analyze_fft(song_id, user_id, take_id, wav_path)
-
-        (sess_dir / "usr_pitch.json").write_text(json.dumps(analysis.get("usr_pitch"), ensure_ascii=False), encoding="utf-8")
-        (sess_dir / "ref_pitch.json").write_text(json.dumps(analysis.get("ref_pitch"), ensure_ascii=False), encoding="utf-8")
-        (sess_dir / "events.json").write_text(json.dumps(analysis.get("events"), ensure_ascii=False), encoding="utf-8")
-        (sess_dir / "summary.json").write_text(json.dumps(analysis.get("summary"), ensure_ascii=False), encoding="utf-8")
+        # ✅ queued を必ず作る（ここが重要）
+        set_status(sess_dir, state="queued", message="uploaded")
 
         return jsonify({
             "ok": True,
-            "message": "uploaded_and_analyzed",
-            "saved_path": str(wav_path),
-            "session_id": analysis.get("session_id"),
+            "message": "uploaded",
+            "session_id": f"{song_id}/{user_id}/{take_id}",
             "song_id": song_id,
             "user_id": user_id,
             "take_id": take_id,
@@ -748,6 +1010,80 @@ def upload_voice(user_id: str):
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
+# ==================================================
+# API: analyze (RUN ANALYSIS)
+# POST /api/analyze/<session_id>
+# ==================================================
+@app.post("/api/analyze/<path:session_id>")
+def analyze_session(session_id: str):
+    song_id = user_id = take_id = None
+    sess_dir = None
+    try:
+        song_id, user_id, take_id = parse_session_id(session_id)
+        sess_dir = get_session_dir(song_id, user_id, take_id)
+        wav_path = sess_dir / "input.wav"
+
+        if not wav_path.exists():
+            set_status(sess_dir, state="error", message="input.wav not found")
+            return json_error(404, "FILE_NOT_FOUND", f"input.wav not found: {wav_path}")
+
+        set_status(sess_dir, state="running", message="analyzing")
+        set_status(sess_dir, state="done", message="analyzed")
+        
+        analysis = analyze_fft(song_id, user_id, take_id, wav_path)
+
+        # ★ None 対策（ここ重要）
+        usr_pitch = analysis.get("usr_pitch") or {}
+        ref_pitch = analysis.get("ref_pitch") or {}
+        events   = analysis.get("events")   or []
+        summary  = analysis.get("summary")  or {}
+
+        atomic_write_json(sess_dir / "usr_pitch.json", usr_pitch)
+        atomic_write_json(sess_dir / "ref_pitch.json", ref_pitch)
+        atomic_write_json(sess_dir / "events.json", events)
+        atomic_write_json(sess_dir / "summary.json", summary)
+
+        set_status(sess_dir, state="done", message="analyzed")
+
+        return jsonify({
+            "ok": True,
+            "message": "analyzed",
+            "session_id": analysis.get("session_id") or session_id,
+            "song_id": song_id,
+            "user_id": user_id,
+            "take_id": take_id,
+        })
+
+    except Exception as e:
+        if sess_dir is not None:
+            try:
+                set_status(sess_dir, state="error", message=str(e))
+            except Exception:
+                pass
+        return json_error(500, "INTERNAL_ERROR", str(e))
+
+# ==================================================
+# API: status (optional but useful)
+# GET /api/status/<session_id>
+# ==================================================
+@app.get("/api/status/<path:session_id>")
+def get_status_api(session_id: str):
+    try:
+        song_id, user_id, take_id = parse_session_id(session_id)
+        if not take_id:
+            return jsonify({"ok": True, "session_id": session_id, "state": "unknown", "message": "take_id missing"})
+        sess_dir = get_session_dir(song_id, user_id, take_id)
+        s = get_status(sess_dir)
+        if not s:
+            return jsonify({"ok": True, "session_id": session_id, "state": "unknown", "message": "no status yet"})
+        s2 = dict(s)
+        s2["session_id"] = session_id
+        s2["song_id"] = song_id
+        s2["user_id"] = user_id
+        s2["take_id"] = take_id
+        return jsonify(s2)
+    except Exception as e:
+        return json_error(500, "INTERNAL_ERROR", str(e))
 
 # ==================================================
 # API: analysis
@@ -764,6 +1100,17 @@ def get_analysis(session_id: str):
         events_path = sess_dir / "events.json"
         summary_path = sess_dir / "summary.json"
 
+        # ★ 生成待ちなら 202 で返す（iOSが“待つ”判断できる）
+        if not (ref_pitch_path.exists() and usr_pitch_path.exists() and events_path.exists() and summary_path.exists()):
+            s = get_status(sess_dir) or {"state": "unknown", "message": "no status yet"}
+            return jsonify({
+                "ok": False,
+                "code": "NOT_READY",
+                "message": "analysis files not ready",
+                "session_id": session_id,
+                "status": s,
+            }), 202
+
         ref_pitch = read_json_or_error(ref_pitch_path, "ref_pitch")
         usr_pitch = read_json_or_error(usr_pitch_path, "usr_pitch")
         events = read_json_or_error(events_path, "events")
@@ -778,28 +1125,10 @@ def get_analysis(session_id: str):
             "ref_pitch": ref_pitch,
             "usr_pitch": usr_pitch,
             "summary": summary,
-            "meta": {
-                "paths": {
-                    "ref_pitch": str(ref_pitch_path),
-                    "usr_pitch": str(usr_pitch_path),
-                    "events": str(events_path),
-                    "summary": str(summary_path),
-                },
-                "counts": {
-                    "ref_track": safe_len(ref_pitch.get("track")) if isinstance(ref_pitch, dict) else None,
-                    "usr_track": safe_len(usr_pitch.get("track")) if isinstance(usr_pitch, dict) else None,
-                    "events": safe_len(events),
-                },
-            },
         })
 
-    except FileNotFoundError as e:
-        return json_error(404, "FILE_NOT_FOUND", str(e))
-    except ValueError as e:
-        return json_error(500, "INVALID_JSON", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
-
 
 # ==================================================
 # AI comment (core + compat routes)
@@ -808,18 +1137,16 @@ def _ai_comment_core(song_id: str, user_id: str, take_id: Optional[str]):
     require_openai_key_or_error()
 
     sess_dir = get_session_dir(song_id, user_id, take_id)
-
-    events_path = sess_dir / "events.json"
-    summary_path = sess_dir / "summary.json"
+    paths = session_paths(sess_dir)
 
     events: List[Dict[str, Any]] = []
     summary: Dict[str, Any] = {}
 
     try:
-        if events_path.exists():
-            events = read_json_or_error(events_path, "events")
-        if summary_path.exists():
-            summary = read_json_or_error(summary_path, "summary")
+        if paths["events"].exists():
+            events = read_json_or_error(paths["events"], "events")
+        if paths["summary"].exists():
+            summary = read_json_or_error(paths["summary"], "summary")
     except Exception:
         events = []
         summary = {}
@@ -903,7 +1230,6 @@ def _ai_comment_core(song_id: str, user_id: str, take_id: Optional[str]):
         "prompt_version": PROMPT_VERSION_DEFAULT,
     })
 
-
 @app.post("/api/comment/<song_id>/<user_id>")
 def ai_comment(song_id: str, user_id: str):
     try:
@@ -912,7 +1238,6 @@ def ai_comment(song_id: str, user_id: str):
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
-
 
 @app.post("/api/comment/<song_id>/<user_id>/<take_id>")
 def ai_comment_with_take(song_id: str, user_id: str, take_id: str):
@@ -923,7 +1248,6 @@ def ai_comment_with_take(song_id: str, user_id: str, take_id: str):
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
-
 @app.post("/api/comment/<path:session_id>")
 def ai_comment_by_session(session_id: str):
     try:
@@ -933,7 +1257,6 @@ def ai_comment_by_session(session_id: str):
         return json_error(500, "OPENAI_KEY_MISSING", str(e))
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
-
 
 # ==================================================
 # History append/list/delete
@@ -1019,7 +1342,6 @@ def history_append(song_id: str, user_id: str):
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
-
 @app.get("/api/history/<user_id>")
 def history_list(user_id: str):
     try:
@@ -1095,7 +1417,6 @@ def history_list(user_id: str):
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
-
 @app.delete("/api/history/<user_id>/<history_id>")
 def history_delete(user_id: str, history_id: str):
     try:
@@ -1109,7 +1430,6 @@ def history_delete(user_id: str, history_id: str):
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
 
-
 # ==================================================
 # 起動時に必ず DB を初期化（gunicorn 対応）
 # ==================================================
@@ -1120,7 +1440,6 @@ try:
     get_song_catalog(force_reload=True)
 except Exception:
     pass
-
 
 # ==================================================
 # Main（ローカル用）
@@ -1133,7 +1452,7 @@ if __name__ == "__main__":
         print("SERVER_SONGS_DIR =", str(SERVER_SONGS_DIR))
         print("SERVER_SONGS_JSON =", str(SERVER_SONGS_JSON), "exists=", SERVER_SONGS_JSON.exists())
         print("DB_PATH =", str(DB_PATH))
-        print("FFT pitch: hop =", PITCH_HOP, "fmin =", PITCH_FMIN, "fmax =", PITCH_FMAX)
+        print("Pitch algo =", PITCH_ALGO, "hop =", PITCH_HOP, "frame_len =", PITCH_FRAME_LEN, "max_seconds =", PITCH_MAX_SECONDS)
         print("ffmpeg =", _which("ffmpeg"))
         if _song_cache:
             print("song_ids =", list(_song_cache.keys()))

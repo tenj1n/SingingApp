@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RecordEntryView: View {
+    let userId: String
     @State private var ready = false
     
     var body: some View {
@@ -13,7 +14,7 @@ struct RecordEntryView: View {
             .ignoresSafeArea()
             
             if ready {
-                RecordVoiceView()
+                RecordVoiceView(userId: userId)   // ✅ ここが重要
             } else {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -26,9 +27,14 @@ struct RecordEntryView: View {
         .navigationTitle("録音")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            // 1フレーム待って先に画面を出す（体感が激変する）
             await Task.yield()
             ready = true
         }
+    }
+}
+
+#Preview {
+    NavigationStack {
+        RecordEntryView(userId: "preview_user_123")
     }
 }

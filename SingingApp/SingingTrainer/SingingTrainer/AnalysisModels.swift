@@ -7,17 +7,127 @@ struct PitchPoint: Decodable {
     let t: Double?
     let f0Hz: Double?
     
-    enum CodingKeys: String, CodingKey {
-        case t
-        case f0Hz = "f0_hz"
+    init(t: Double?, f0Hz: Double?) {
+        self.t = t
+        self.f0Hz = f0Hz
+    }
+    
+    enum CodingKeys: String, CodingKey { case t; case f0Hz = "f0_hz" }
+    
+    init(from decoder: Decoder) throws {
+        if let c = try? decoder.container(keyedBy: CodingKeys.self) {
+            self.t = try c.decodeIfPresent(Double.self, forKey: .t)
+            self.f0Hz = try c.decodeIfPresent(Double.self, forKey: .f0Hz)
+            return
+        }
+        var u = try decoder.unkeyedContainer()
+        self.t = u.isAtEnd ? nil : try u.decode(Double?.self)
+        self.f0Hz = u.isAtEnd ? nil : try u.decode(Double?.self)
+    }
+}
+
+enum JSONAny: Decodable {
+    case null
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([JSONAny])
+    case object([String: JSONAny])
+    
+    init(from decoder: Decoder) throws {
+        if let c = try? decoder.singleValueContainer() {
+            if c.decodeNil() { self = .null; return }
+            if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+            if let v = try? c.decode(Int.self) { self = .int(v); return }
+            if let v = try? c.decode(Double.self) { self = .double(v); return }
+            if let v = try? c.decode(String.self) { self = .string(v); return }
+        }
+        if var a = try? decoder.unkeyedContainer() {
+            var arr: [JSONAny] = []
+            while !a.isAtEnd { arr.append(try a.decode(JSONAny.self)) }
+            self = .array(arr)
+            return
+        }
+        let o = try decoder.container(keyedBy: AnyKey.self)
+        var dict: [String: JSONAny] = [:]
+        for k in o.allKeys { dict[k.stringValue] = try o.decode(JSONAny.self, forKey: k) }
+        self = .object(dict)
+    }
+    
+    var doubleValue: Double? {
+        switch self {
+        case .double(let v): return v
+        case .int(let v): return Double(v)
+        case .string(let s): return Double(s)
+        default: return nil
+        }
+    }
+    
+    private struct AnyKey: CodingKey {
+        var stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? = nil
+        init?(intValue: Int) { return nil }
     }
 }
 
 struct PitchTrack: Decodable {
-    let algo: String?   // null 対応
-    let sr: Int?        // null 対応
-    let hop: Int?       // null 対応
+    let algo: String?
+    let sr: Int?
+    let hop: Int?
     let track: [PitchPoint]?
+    
+    enum CodingKeys: String, CodingKey { case algo, sr, hop, track }
+    
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.algo = try c.decodeIfPresent(String.self, forKey: .algo)
+        self.sr   = try c.decodeIfPresent(Int.self, forKey: .sr)
+        self.hop  = try c.decodeIfPresent(Int.self, forKey: .hop)
+        
+        // track は形がブレるので “生のJSON” として取る
+        if let raw = try? c.decodeIfPresent(JSONAny.self, forKey: .track) {
+            self.track = PitchTrack.parseTrack(raw)
+        } else {
+            self.track = nil
+        }
+    }
+    
+    // track の JSON を [PitchPoint] に正規化
+    private static func parseTrack(_ raw: JSONAny) -> [PitchPoint]? {
+        // 1) [ {t,f0_hz}, ... ] or [ [t,f0], ... ]
+        if case .array(let arr) = raw {
+            // 2次元の可能性： [[...],[...]] なら平坦化
+            let flattened: [JSONAny]
+            if arr.count > 0, case .array = arr[0] {
+                flattened = arr.flatMap { item -> [JSONAny] in
+                    if case .array(let inner) = item { return inner }
+                    return [item]
+                }
+            } else {
+                flattened = arr
+            }
+            
+            let points: [PitchPoint] = flattened.compactMap { item in
+                // dict形式
+                if case .object(let obj) = item {
+                    let t = obj["t"]?.doubleValue
+                    let f0 = (obj["f0_hz"] ?? obj["f0Hz"])?.doubleValue
+                    return PitchPoint(t: t, f0Hz: f0)
+                }
+                // [t,f0]形式
+                if case .array(let pair) = item {
+                    let t = pair.count > 0 ? pair[0].doubleValue : nil
+                    let f0 = pair.count > 1 ? pair[1].doubleValue : nil
+                    return PitchPoint(t: t, f0Hz: f0)
+                }
+                return nil
+            }
+            return points
+        }
+        return nil
+    }
 }
 
 struct PitchEvent: Decodable, Identifiable {

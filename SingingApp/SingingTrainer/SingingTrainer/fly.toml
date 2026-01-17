@@ -27,3 +27,5 @@ primary_region = 'nrt'
   destination = "/data"
   processes = ["app"]
 
+[processes]
+app = "gunicorn -b 0.0.0.0:8080 server:app --workers 1 --threads 1 --timeout 400 --graceful-timeout 30 --access-logfile - --error-logfile - --log-level info"

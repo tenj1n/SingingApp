@@ -6,6 +6,34 @@
             "instrumental": "0005686800.320_no_voice_split_by_lalalai.m4a",
             "singer": "0005686800.320_voice_split_by_lalalai.m4a",
             "lyrics": "orpheus_lyrics.json"
+        },
+        {
+            "id": "melomeloid",
+            "title": "メロメロイド",
+            "instrumental": "0030766587.320_no_voice_split_by_lalalai.m4a",
+            "singer": "0030766587.320_voice_split_by_lalalai.m4a",
+            "lyrics": "melomeloid_lyrics.json"
+        },
+        {
+            "id": "marigold",
+            "title": "マリーゴールド",
+            "instrumental": "0012272802.320_no_voice_split_by_lalalai.m4a",
+            "singer": "0012272802.320_voice_split_by_lalalai.m4a",
+            "lyrics": "marigold_lyrics.json"
+        },
+        {
+            "id": "aizo",
+            "title": "AIZO",
+            "instrumental": "0043164088.320_no_voice_split_by_lalalai.m4a",
+            "singer": "0043164088.320_voice_split_by_lalalai.m4a",
+            "lyrics": "aizo_lyrics.json"
+        },
+        {
+            "id": "kaijyu",
+            "title": "怪獣の花唄",
+            "instrumental": "0015993715.320_no_voice_split_by_lalalai.m4a",
+            "singer": "0015993715.320_voice_split_by_lalalai.m4a",
+            "lyrics": "kaijyu_lyrics.json"
         }
     ]
 }

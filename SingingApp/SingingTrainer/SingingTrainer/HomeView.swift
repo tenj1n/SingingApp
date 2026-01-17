@@ -25,9 +25,8 @@ struct HomeView: View {
                             accent: .red,
                             isEnabled: hasUserId
                         ) {
-                            RecordEntryView()
+                            RecordEntryView(userId: userSession.userId!)
                         }
-                        
                         // 履歴
                         NavCard(
                             title: "履歴を見る",

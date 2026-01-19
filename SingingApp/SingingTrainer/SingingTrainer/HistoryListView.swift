@@ -1,8 +1,5 @@
 import SwiftUI
 
-// ✅ このファイル全体で使える型エイリアス（スコープ問題を根絶）
-typealias HistoryItem = HistoryListResponse.HistoryItem
-
 // MARK: - HistoryListView (Game UI)
 
 struct HistoryListView: View {
@@ -110,21 +107,44 @@ struct HistoryListView: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(vm.items) { item in
-                        NavigationLink {
-                            HistoryDetailView(item: item)
-                        } label: {
-                            HistoryRowCard(item: item)
-                        }
-                        .buttonStyle(.plain)
-                        // ✅ ScrollView では .onDelete は使えないので swipeActions で削除
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
-                                    vm.delete(at: IndexSet(integer: idx))
-                                }
+                    
+                    // ✅ ここを変更：id を明示して Binding版 ForEach を回避
+                    ForEach(vm.items, id: \.id) { item in
+                        
+                        // ✅ sessionId があれば CompareView 直行
+                        if let sid = item.sessionId, !sid.isEmpty {
+                            NavigationLink {
+                                CompareView(sessionId: sid)
                             } label: {
-                                Label("削除", systemImage: "trash")
+                                HistoryRowCard(item: item)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
+                                        vm.delete(at: IndexSet(integer: idx))
+                                    }
+                                } label: {
+                                    Label("削除", systemImage: "trash")
+                                }
+                            }
+                            
+                        } else {
+                            // sessionId が無いものは従来通り詳細へ
+                            NavigationLink {
+                                HistoryDetailView(item: item)
+                            } label: {
+                                HistoryRowCard(item: item)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
+                                        vm.delete(at: IndexSet(integer: idx))
+                                    }
+                                } label: {
+                                    Label("削除", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -237,7 +257,25 @@ struct HistoryListView: View {
 private struct HistoryRowCard: View {
     let item: HistoryItem
     
-    private var titleText: String { item.title ?? "(no title)" }
+    private var titleText: String {
+        // 1) songTitle があれば最優先
+        if let s = item.songTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        
+        // 2) title があれば次
+        if let s = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        
+        // 3) songId があれば、songs.json から曲名に変換して出す（ここが今回の肝）
+        if let sid = item.songId?.trimmingCharacters(in: .whitespacesAndNewlines), !sid.isEmpty {
+            if let name = SongCatalog.shared.title(for: sid), !name.isEmpty {
+                return name   // ✅ "kaijyu" -> "怪獣の花唄" になる
+            }
+            return sid // 変換できなかった時だけ id を表示
+        }
+        
+        return "(no title)"
+    }
+
+    
     private var bodyText: String { item.body ?? "" }
     
     private var subText: String {
@@ -298,7 +336,6 @@ private struct HistoryRowCard: View {
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 
-                // スコアが返ってくる設計ならここで表示
                 ScoreLine(item: item)
             }
         }
@@ -390,7 +427,13 @@ private struct ProgressBar: View {
 struct HistoryDetailView: View {
     let item: HistoryItem
     
-    private var titleText: String { item.title ?? "履歴" }
+    private var titleText: String {
+        if let s = item.songTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        if let s = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        if let s = item.songId?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
+        return "履歴"
+    }
+    
     private var bodyText: String { item.body ?? "" }
     private var metaText: String {
         if let s = item.createdAt, !s.isEmpty { return s }
@@ -427,7 +470,6 @@ struct HistoryDetailView: View {
                         }
                     }
                     
-                    // sessionId がある時だけ Compare へ
                     if let sid = item.sessionId, !sid.isEmpty {
                         NavigationLink {
                             CompareView(sessionId: sid)
@@ -455,7 +497,7 @@ struct HistoryDetailView: View {
     }
 }
 
-// MARK: - Shared Components (same taste as RecordVoiceView)
+// MARK: - Shared Components
 
 private struct GameBackground: View {
     var body: some View {

@@ -40,9 +40,8 @@ final class CompareViewModel: ObservableObject {
     @Published private(set) var lastSessionId: String?
     
     // ==================================================
-    // MARK: - Public
+    // MARK: - Load / Apply
     // ==================================================
-    
     func load(sessionId: String) {
         guard !isLoading else { return }
         isLoading = true
@@ -82,9 +81,8 @@ final class CompareViewModel: ObservableObject {
     }
     
     // ==================================================
-    // MARK: - Core
+    // MARK: - Rebuild
     // ==================================================
-    
     func rebuildCaches() {
         guard let a = analysis else {
             overlayPoints = []
@@ -112,7 +110,7 @@ final class CompareViewModel: ObservableObject {
             return TimedF0(t: t, f0Hz: (f0 != nil && (f0 ?? 0) > 0) ? f0 : nil)
         }
         
-        if ref.isEmpty || usr.isEmpty {
+        guard !ref.isEmpty, !usr.isEmpty else {
             overlayPoints = []
             errorPoints = []
             sampleCount = 0
@@ -129,7 +127,7 @@ final class CompareViewModel: ObservableObject {
         
         let t0 = max(refS.first!.t, usrS.first!.t)
         let t1 = min(refS.last!.t, usrS.last!.t)
-        if t1 <= t0 {
+        guard t1 > t0 else {
             overlayPoints = []
             errorPoints = []
             sampleCount = 0
@@ -141,31 +139,28 @@ final class CompareViewModel: ObservableObject {
             return
         }
         
-        let refDtBase = Self.estimateDt(sr: a.refPitch?.sr, hop: a.refPitch?.hop)
-        let usrDtBase = Self.estimateDt(sr: a.usrPitch?.sr, hop: a.usrPitch?.hop)
-        var dtBase = min(refDtBase, usrDtBase)
+        var dtBase = min(Self.estimateDt(sr: a.refPitch?.sr, hop: a.refPitch?.hop),
+                         Self.estimateDt(sr: a.usrPitch?.sr, hop: a.usrPitch?.hop))
         if !(dtBase > 0 && dtBase < 0.2) { dtBase = 0.02 }
         
         let refInterp = LinearInterp(track: refS)
         let usrInterp = LinearInterp(track: usrS)
         
-        // 信頼性判定用（density 無し）
+        // ✅ 信頼性判定用（density 無し）
         var validForConfidence: Int = 0
-        do {
-            var t = t0
-            while t <= t1 {
-                let rf = refInterp.value(at: t)
-                let uf = usrInterp.value(at: t)
-                if (rf != nil && (rf ?? 0) > 0) && (uf != nil && (uf ?? 0) > 0) {
-                    validForConfidence += 1
-                }
-                t += dtBase
+        var tc = t0
+        while tc <= t1 {
+            let rf = refInterp.value(at: tc)
+            let uf = usrInterp.value(at: tc)
+            if (rf != nil && (rf ?? 0) > 0) && (uf != nil && (uf ?? 0) > 0) {
+                validForConfidence += 1
             }
+            tc += dtBase
         }
         self.sampleCount = validForConfidence
         
-        // 表示用（density 反映）
-        var dt = dtBase * Double(density.multiplier)
+        // ✅ 表示用（density 反映）
+        let dt = dtBase * Double(density.multiplier)
         
         var aligned: [AlignedPoint] = []
         aligned.reserveCapacity(Int((t1 - t0) / dt) + 8)
@@ -182,16 +177,9 @@ final class CompareViewModel: ObservableObject {
         
         let valid = aligned.filter { $0.refVoiced && $0.usrVoiced }
         
-        // --------------------------------------------------
-        // ✅ octaveInvariant が ON のときは、
-        //    overlay(usr) と error(usr-ref) の両方で
-        //    usrHz を “refHz に近いオクターブ” に寄せる
-        // --------------------------------------------------
-        
         // overlayPoints
         var ov: [OverlayPoint] = []
         ov.reserveCapacity(aligned.count * 2)
-        
         for p in aligned {
             let refMidi = p.refHz.flatMap { PitchMath.hzToMidi($0) }
             
@@ -216,12 +204,9 @@ final class CompareViewModel: ObservableObject {
         for p in valid {
             guard let rhz = p.refHz, let uhz = p.usrHz else { continue }
             
-            let usrHzAligned: Double
-            if octaveInvariant {
-                usrHzAligned = PitchMath.shiftUsrHzToClosestOctave(refHz: rhz, usrHz: uhz)
-            } else {
-                usrHzAligned = uhz
-            }
+            let usrHzAligned = octaveInvariant
+            ? PitchMath.shiftUsrHzToClosestOctave(refHz: rhz, usrHz: uhz)
+            : uhz
             
             let cents = PitchMath.centsDiff(refHz: rhz, usrHz: usrHzAligned)
             errs.append(.init(time: p.t, cents: cents))
@@ -236,12 +221,10 @@ final class CompareViewModel: ObservableObject {
         self.meanAbsCents = absCentsSum / Double(n)
         self.percentWithinTol = Double(withinTolCount) / Double(n)
         
-        // スコア（今の PitchMath 設定をそのまま使う）
         self.score100 = PitchMath.scoreFromMeanAbsCents(meanAbsCents: meanAbsCents)
         
-        // 表示用の2種（今のUIの “通常/オクターブ無視” 表示を維持）
         if octaveInvariant {
-            let strictMean = Self.computeMeanAbsCentsStrict(valid: valid) // ここは “無視しない” 平均
+            let strictMean = Self.computeMeanAbsCentsStrict(valid: valid)
             self.score100Strict = PitchMath.scoreFromMeanAbsCents(meanAbsCents: strictMean)
             self.score100OctaveInvariant = self.score100
         } else {
@@ -254,7 +237,6 @@ final class CompareViewModel: ObservableObject {
     // ==================================================
     // MARK: - AI Comment / History
     // ==================================================
-    
     func generateAIComment() {
         guard let sid = lastSessionId else { return }
         guard !isAICommentLoading else { return }
@@ -277,11 +259,8 @@ final class CompareViewModel: ObservableObject {
         }
     }
     
-    func saveAICommentToHistory() {
+    func saveAICommentToHistory(songId: String, songTitle: String) {
         guard let sid = lastSessionId else { return }
-        
-        print("[SAVE] didGenerateAIComment=\(didGenerateAIComment) bodyLen=\(commentBody.count) titleLen=\(commentTitle.count) sid=\(sid)")
-        
         guard !commentBody.isEmpty else { return }
         guard didGenerateAIComment else { return }
         guard !isHistorySaving else { return }
@@ -293,8 +272,11 @@ final class CompareViewModel: ObservableObject {
             defer { isHistorySaving = false }
             do {
                 let req = HistorySaveRequest(
-                    title: commentTitle,
-                    body: commentBody,
+                    commentTitle: commentTitle,
+                    commentBody: commentBody,
+                    songId: songId,
+                    songTitle: songTitle,
+                    sessionId: sid,
                     score100: score100,
                     score100Strict: score100Strict,
                     score100OctaveInvariant: score100OctaveInvariant,
@@ -302,19 +284,29 @@ final class CompareViewModel: ObservableObject {
                     percentWithinTol: percentWithinTol,
                     sampleCount: sampleCount
                 )
-                _ = try await APIClient.shared.appendHistory(sessionId: sid, reqBody: req, commentSource: .ai)
+                
+                _ = try await APIClient.shared.appendHistory(
+                    sessionId: sid,
+                    reqBody: req,
+                    commentSource: .ai
+                )
                 self.isHistorySaved = true
             } catch {
                 self.historySaveError = error.localizedDescription
             }
         }
     }
-
+    
+    // 古い呼び出し互換（残したいなら）
+    func saveAICommentToHistory() {
+        guard let sid = lastSessionId else { return }
+        let songId = sid.split(separator: "/").first.map(String.init) ?? "unknown"
+        saveAICommentToHistory(songId: songId, songTitle: songId)
+    }
     
     // ==================================================
-    // MARK: - Helpers
+    // MARK: - Helpers (Static)
     // ==================================================
-    
     private static func estimateDt(sr: Int?, hop: Int?) -> Double {
         guard let sr, let hop, sr > 0, hop > 0 else { return 0.0 }
         return Double(hop) / Double(sr)
@@ -347,9 +339,8 @@ final class CompareViewModel: ObservableObject {
 }
 
 // ==================================================
-// MARK: - Local types
+// MARK: - Local types (CompareViewModel.swift 内だけで使う)
 // ==================================================
-
 private struct TimedF0 {
     let t: Double
     let f0Hz: Double?

@@ -310,13 +310,6 @@ final class APIClient {
         
         return try decode(HistorySaveResponse.self, from: data)
     }
-
-    
-    /// よく使う形（title/bodyだけ渡す）
-    func appendHistory(sessionId: String, title: String, body: String, commentSource: CommentSource) async throws -> HistorySaveResponse {
-        let req = HistorySaveRequest(title: title, body: body)
-        return try await appendHistory(sessionId: sessionId, reqBody: req, commentSource: commentSource)
-    }
     
     // ==================================================
     // MARK: - History list
@@ -385,7 +378,7 @@ final class APIClient {
     // ==================================================
     // MARK: - Helpers
     // ==================================================
-    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T  {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
@@ -394,7 +387,7 @@ final class APIClient {
         }
     }
     
-    private func checkHTTP(resp: URLResponse, data: Data) throws {
+    func checkHTTP(resp: URLResponse, data: Data) throws {
         guard let http = resp as? HTTPURLResponse else {
             throw APIError.invalidResponse("no http response")
         }

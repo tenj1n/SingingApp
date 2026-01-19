@@ -166,7 +166,6 @@ struct CompareView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            // ✅ デバッグ用：点数が 0 のときの切り分け表示（本番で邪魔なら消す）
             if vm.score100 <= 0.01 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("デバッグ: score=0 の原因確認")
@@ -183,7 +182,6 @@ struct CompareView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             
-            // ✅ lowConfidenceでも “抑止” ではなく “注意表示”
             if lowConfidence {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("声検出不足のため、評価の信頼性が低いです（参考表示）")
@@ -226,7 +224,14 @@ struct CompareView: View {
                     .disabled(vm.isAICommentLoading)
                     
                     Button(vm.isHistorySaved ? "保存済み" : (vm.isHistorySaving ? "保存中…" : "履歴に保存")) {
-                        vm.saveAICommentToHistory()
+                        // ✅ songStore は使わない（未定義で落ちるため）
+                        // sessionId から songId を取り出す（"kaijyu/xxxx/xxxx" の先頭）
+                        let songId = sessionId.split(separator: "/").first.map(String.init) ?? "unknown"
+                        
+                        // ✅ いったん曲名は songId を仮で入れる（後で履歴一覧では song_title を表示する）
+                        let songTitle = songId
+                        
+                        vm.saveAICommentToHistory(songId: songId, songTitle: songTitle)
                     }
                     .buttonStyle(.bordered)
                     .disabled(vm.commentBody.isEmpty || vm.isHistorySaving || vm.isHistorySaved || vm.isAICommentLoading)
@@ -340,7 +345,6 @@ struct CompareView: View {
             var prevT: Double? = nil
             for p in pts {
                 if let prev = prevT, (p.time - prev) > overlayGapSec {
-                    // nil を差し込んで線を切る
                     out.append(.init(time: p.time, midi: nil, series: p.series))
                 }
                 out.append(p)
@@ -377,7 +381,6 @@ struct CompareView: View {
                 Text("ピッチデータがありません").foregroundStyle(.secondary)
             } else {
                 Chart {
-                    // ✅ 歌手：線
                     ForEach(refPts) { p in
                         if let m = p.midi {
                             LineMark(
@@ -389,7 +392,6 @@ struct CompareView: View {
                         }
                     }
                     
-                    // ✅ 自分：点→線に変更（要望対応）
                     ForEach(usrPts) { p in
                         if let m = p.midi {
                             LineMark(

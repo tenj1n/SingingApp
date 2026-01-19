@@ -1,42 +1,21 @@
 import Foundation
 
 // ==================================================
-// MARK: - AI Comment Models
-// ==================================================
-
-struct AICommentRequest: Encodable {
-    var promptVersion: String? = nil
-    var model: String? = nil
-    
-    enum CodingKeys: String, CodingKey {
-        case promptVersion = "prompt_version"
-        case model
-    }
-}
-
-struct AICommentResponse: Decodable {
-    let ok: Bool?
-    let title: String?
-    let body: String?
-    let model: String?
-    let promptVersion: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case ok, title, body, model
-        case promptVersion = "prompt_version"
-    }
-}
-
-// ==================================================
 // MARK: - History Save / List / Delete Models
 // ==================================================
 
-import Foundation
-
 struct HistorySaveRequest: Encodable {
-    var title: String
-    var body: String
     
+    // 保存するコメント
+    var commentTitle: String
+    var commentBody: String
+    
+    // 履歴で必要なメタ
+    var songId: String
+    var songTitle: String
+    var sessionId: String
+    
+    // スコア系（任意）
     var score100: Double? = nil
     var score100Strict: Double? = nil
     var score100OctaveInvariant: Double? = nil
@@ -45,11 +24,13 @@ struct HistorySaveRequest: Encodable {
     var sampleCount: Int? = nil
     
     enum CodingKeys: String, CodingKey {
-        // ✅ サーバが欲しいキーに合わせる
-        case title = "commentTitle"
-        case body  = "commentBody"
+        case commentTitle = "commentTitle"
+        case commentBody  = "commentBody"
         
-        // ✅ snake_case はそのまま維持（サーバ側が snake_case っぽいので）
+        case songId = "song_id"
+        case songTitle = "song_title"
+        case sessionId = "session_id"
+        
         case score100 = "score100"
         case score100Strict = "score100_strict"
         case score100OctaveInvariant = "score100_octave_invariant"
@@ -73,15 +54,20 @@ struct HistorySaveResponse: Decodable {
 struct HistoryListResponse: Decodable {
     let ok: Bool?
     let message: String?
-    let items: [HistoryItem]?   // ✅ 配列
+    let items: [HistoryItem]?
     
+    // ✅ ここが重要：他ファイルが HistoryListResponse.HistoryItem を参照してても壊れない
     struct HistoryItem: Decodable, Identifiable {
         let id: String
-        let songId: String?
         let createdAt: String?
+        
         let source: String?
         let title: String?
         let body: String?
+        
+        let songId: String?
+        let songTitle: String?
+        let sessionId: String?
         
         let score100: Double?
         let score100Strict: Double?
@@ -90,13 +76,17 @@ struct HistoryListResponse: Decodable {
         let percentWithinTol: Double?
         let sampleCount: Int?
         
-        let sessionId: String?
-        
         enum CodingKeys: String, CodingKey {
             case id
-            case songId = "song_id"
             case createdAt = "created_at"
-            case source, title, body
+            
+            case source
+            case title
+            case body
+            
+            case songId = "song_id"
+            case songTitle = "song_title"
+            case sessionId = "session_id"
             
             case score100 = "score100"
             case score100Strict = "score100_strict"
@@ -104,11 +94,26 @@ struct HistoryListResponse: Decodable {
             case meanAbsCents = "mean_abs_cents"
             case percentWithinTol = "percent_within_tol"
             case sampleCount = "sample_count"
-            
-            case sessionId = "session_id"
         }
     }
+    
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case message
+        case items
+    }
+    
+    // ✅ items は配列なので [HistoryItem].self で decodeIfPresent
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+        self.message = try c.decodeIfPresent(String.self, forKey: .message)
+        self.items = try c.decodeIfPresent([HistoryItem].self, forKey: .items)
+    }
 }
+
+// 他のファイルで「HistoryItem」単体で使いたい場合のショートカット（任意）
+typealias HistoryItem = HistoryListResponse.HistoryItem
 
 struct SimpleOkResponse: Decodable {
     let ok: Bool?

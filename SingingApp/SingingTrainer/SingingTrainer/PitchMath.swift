@@ -59,7 +59,7 @@ enum PitchMath {
         // 233c ≈ 33〜35 点
         // 300c ≈ 16.5
         // 600c ≈ 0 点付近
-        let k = 2.0e-5
+        let k = 7.0e-6
         
         let raw = 100.0 * exp(-k * x * x)
         

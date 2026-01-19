@@ -1,5 +1,8 @@
 import SwiftUI
 
+// ✅ このファイル全体で使える型エイリアス（スコープ問題を根絶）
+typealias HistoryItem = HistoryListResponse.HistoryItem
+
 // MARK: - HistoryListView (Game UI)
 
 struct HistoryListView: View {
@@ -18,7 +21,6 @@ struct HistoryListView: View {
                 
                 VStack(spacing: 12) {
                     filterPanel
-                    
                     content
                         .padding(.horizontal, 14)
                 }
@@ -26,7 +28,6 @@ struct HistoryListView: View {
             }
             .navigationTitle("履歴")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { EditButton() }
             .onAppear { vm.resetAndLoad() }
             
             // フィルタが変わったら「先頭から」取り直す
@@ -116,8 +117,17 @@ struct HistoryListView: View {
                             HistoryRowCard(item: item)
                         }
                         .buttonStyle(.plain)
+                        // ✅ ScrollView では .onDelete は使えないので swipeActions で削除
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
+                                    vm.delete(at: IndexSet(integer: idx))
+                                }
+                            } label: {
+                                Label("削除", systemImage: "trash")
+                            }
+                        }
                     }
-                    .onDelete(perform: vm.delete) // EditButton で削除したい場合はこれを残す
                     
                     if vm.canLoadMore || vm.isLoadingMore {
                         loadMoreRow
@@ -227,9 +237,18 @@ struct HistoryListView: View {
 private struct HistoryRowCard: View {
     let item: HistoryItem
     
+    private var titleText: String { item.title ?? "(no title)" }
+    private var bodyText: String { item.body ?? "" }
+    
+    private var subText: String {
+        if let s = item.createdAt, !s.isEmpty { return s }
+        if let s = item.songId, !s.isEmpty { return "song: \(s)" }
+        if let s = item.source, !s.isEmpty { return "source: \(s)" }
+        return ""
+    }
+    
     private var accent: Color {
-        // AIコメントがある/ないで色を分ける（好みで変更OK）
-        item.commentBody.isEmpty ? .white.opacity(0.45) : .green
+        bodyText.isEmpty ? .white.opacity(0.45) : .green
     }
     
     var body: some View {
@@ -245,21 +264,31 @@ private struct HistoryRowCard: View {
                             )
                             .frame(width: 44, height: 44)
                         
-                        Image(systemName: item.commentBody.isEmpty ? "waveform.path" : "sparkles")
+                        Image(systemName: bodyText.isEmpty ? "waveform.path" : "sparkles")
                             .font(.system(size: 18, weight: .black))
                             .foregroundStyle(.white)
                     }
                     
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.commentTitle.isEmpty ? "AIコメント" : item.commentTitle)
+                        Text(titleText)
                             .font(.system(size: 16, weight: .heavy, design: .rounded))
                             .foregroundStyle(.white)
                             .lineLimit(1)
                         
-                        Text(item.experimentShort)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .lineLimit(2)
+                        if !subText.isEmpty {
+                            Text(subText)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(1)
+                        }
+                        
+                        if !bodyText.isEmpty {
+                            Text(bodyText)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.70))
+                                .lineLimit(2)
+                                .padding(.top, 2)
+                        }
                     }
                     
                     Spacer()
@@ -269,7 +298,7 @@ private struct HistoryRowCard: View {
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 
-                // スコア行
+                // スコアが返ってくる設計ならここで表示
                 ScoreLine(item: item)
             }
         }
@@ -295,7 +324,6 @@ private struct ScoreLine: View {
                     .foregroundStyle(.white.opacity(0.9))
             }
             
-            // 0〜100 を想定。ざっくりバーで可視化
             ProgressBar(value: s / 100.0)
             
             HStack(spacing: 10) {
@@ -362,6 +390,15 @@ private struct ProgressBar: View {
 struct HistoryDetailView: View {
     let item: HistoryItem
     
+    private var titleText: String { item.title ?? "履歴" }
+    private var bodyText: String { item.body ?? "" }
+    private var metaText: String {
+        if let s = item.createdAt, !s.isEmpty { return s }
+        if let s = item.songId, !s.isEmpty { return "song: \(s)" }
+        if let s = item.source, !s.isEmpty { return "source: \(s)" }
+        return ""
+    }
+    
     var body: some View {
         ZStack {
             GameBackground()
@@ -371,16 +408,18 @@ struct HistoryDetailView: View {
                     
                     SectionCard(accent: .green) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(item.commentTitle.isEmpty ? "AIコメント" : item.commentTitle)
+                            Text(titleText)
                                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                                 .foregroundStyle(.white)
                             
-                            Text(item.experimentShort)
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.72))
+                            if !metaText.isEmpty {
+                                Text(metaText)
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.72))
+                            }
                             
-                            if !item.commentBody.isEmpty {
-                                Text(item.commentBody)
+                            if !bodyText.isEmpty {
+                                Text(bodyText)
                                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.white.opacity(0.75))
                                     .padding(.top, 4)
@@ -388,19 +427,21 @@ struct HistoryDetailView: View {
                         }
                     }
                     
-                    NavigationLink {
-                        CompareView(sessionId: item.sessionId)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "chart.xyaxis.line")
-                            Text("グラフを見る")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .opacity(0.7)
+                    // sessionId がある時だけ Compare へ
+                    if let sid = item.sessionId, !sid.isEmpty {
+                        NavigationLink {
+                            CompareView(sessionId: sid)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "chart.xyaxis.line")
+                                Text("グラフを見る")
+                                Spacer()
+                                Image(systemName: "chevron.right").opacity(0.7)
+                            }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
+                        .buttonStyle(GlassPrimaryButtonStyle(accent: .blue))
                     }
-                    .buttonStyle(GlassPrimaryButtonStyle(accent: .blue))
                     
                     Spacer(minLength: 18)
                 }

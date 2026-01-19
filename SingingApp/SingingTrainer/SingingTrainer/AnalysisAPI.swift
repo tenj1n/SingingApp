@@ -1,4 +1,4 @@
-import Foundation
+/*import Foundation
 import CryptoKit
 
 final class AnalysisAPI {
@@ -260,3 +260,4 @@ final class AnalysisAPI {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
+*/

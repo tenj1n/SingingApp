@@ -50,8 +50,14 @@ struct ContentView: View {
                 .padding(.top, 18)
                 
                 VStack(spacing: 12) {
+                    
+                    // ✅ userId を渡せるなら渡す（Record→Analyze→Compare の流れが安定する）
                     NavigationLink {
-                        RecordVoiceView()
+                        // もし RecordVoiceView が引数なししか無いなら、この行を下の「引数なし版」に戻してOK
+                        RecordVoiceView(userId: uid)
+                        
+                        // 引数なし版（必要ならこちらを使う）
+                        // RecordVoiceView()
                     } label: {
                         RhythmMenuCard(
                             title: "録音して解析",
@@ -222,7 +228,6 @@ private struct RhythmMenuCard: View {
         }
         .padding(.vertical, 14)
         .padding(.horizontal, 14)
-        // ここが「ShapeStyle が必要」な箇所。AnyView を返すとエラーになる。
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -237,4 +242,3 @@ private struct RhythmMenuCard: View {
     ContentView()
         .environmentObject(UserSession(previewUserId: "preview_user_123"))
 }
-

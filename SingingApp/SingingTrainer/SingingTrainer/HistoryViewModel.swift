@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class HistoryViewModel: ObservableObject {
-    @Published var items: [HistoryItem] = []
+    @Published var items: [HistoryListResponse.HistoryItem] = []
     @Published var isLoading = false          // 初回/リセット読み込み用
     @Published var isLoadingMore = false      // 追加読み込み用
     @Published var errorMessage: String?
@@ -106,7 +106,7 @@ final class HistoryViewModel: ObservableObject {
             do {
                 let source = onlyAI ? "ai" : nil
                 
-                let res = try await AnalysisAPI.shared.fetchHistoryList(
+                let res = try await APIClient.shared.fetchHistoryList(
                     userId: userId,
                     source: source,
                     prompt: promptFilter.queryValue,
@@ -115,18 +115,24 @@ final class HistoryViewModel: ObservableObject {
                     offset: offset
                 )
                 
-                guard res.ok else {
+                guard (res.ok ?? false) else {
                     errorMessage = res.message ?? "履歴の取得に失敗しました"
                     return
                 }
-                
-                let newItems = res.items
+
+                let newItems = res.items ?? []   // ✅ nilなら空配列
                 
                 // 追加
                 items.append(contentsOf: newItems)
                 
                 // 次のoffsetへ
                 offset += newItems.count
+                
+                // 返ってきた件数が pageSize 未満なら「もう次は無い」
+                if newItems.count < pageSize {
+                    hasMore = false
+                }
+
                 
                 // 返ってきた件数が pageSize 未満なら「もう次は無い」
                 if newItems.count < pageSize {
@@ -144,7 +150,7 @@ final class HistoryViewModel: ObservableObject {
         
         Task {
             for t in targets {
-                _ = try? await AnalysisAPI.shared.deleteHistory(userId: userId, historyId: t.id)
+                _ = try? await APIClient.shared.deleteHistory(userId: userId, historyId: t.id)
             }
             // 削除後はズレやすいので先頭から取り直す
             resetAndLoad()

@@ -1,139 +1,172 @@
 import Foundation
 
-// MARK: - Pitch
+// ==================================================
+// MARK: - AnalysisResponse
+// ==================================================
 
-/// サーバの pitch track は t が null の可能性もゼロではないので Optional に寄せる（安全側）
+struct AnalysisResponse: Decodable {
+    let ok: Bool?
+    let sessionId: String?
+    let songId: String?
+    let userId: String?
+    
+    let refPitch: PitchTrack?
+    let usrPitch: PitchTrack?
+    let events: [PitchEvent]?
+    let summary: AnalysisSummary?
+    let meta: Meta?
+    
+    struct Meta: Decodable {
+        let paths: [String: String]?
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case sessionId = "session_id"
+        case songId = "song_id"
+        case userId = "user_id"
+        case refPitch = "ref_pitch"
+        case usrPitch = "usr_pitch"
+        case events
+        case summary
+        case meta
+    }
+}
+extension AnalysisResponse {
+    
+    /// usrPitch.track の総数（nil含む。配列の長さ）
+    var totalSampleCount: Int {
+        usrPitch?.track.count ?? 0
+    }
+    
+    /// usrPitch.track のうち f0Hz が入ってる数（=有効サンプル）
+    var effectiveSampleCount: Int {
+        guard let t = usrPitch?.track else { return 0 }
+        return t.reduce(into: 0) { acc, p in
+            if p.f0Hz != nil { acc += 1 }
+        }
+    }
+    
+    /// ref のほうも見たいなら
+    var refTotalSampleCount: Int {
+        refPitch?.track.count ?? 0
+    }
+    
+    var refEffectiveSampleCount: Int {
+        guard let t = refPitch?.track else { return 0 }
+        return t.reduce(into: 0) { acc, p in
+            if p.f0Hz != nil { acc += 1 }
+        }
+    }
+}
+
+struct AnalysisSummary: Decodable {
+    let verdict: String?
+    let reason: String?
+    let tips: [String]?
+    let tolCents: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case verdict, reason, tips
+        case tolCents = "tol_cents"
+    }
+}
+
+// ==================================================
+// MARK: - Pitch Track
+// ==================================================
+
+struct PitchTrack: Decodable {
+    let algo: String?
+    let sr: Int?
+    let hop: Int?
+    let frameLen: Int?
+    
+    /// ✅ ここが重要：どんな形で来ても最終的に 1次元 [PitchPoint] にして持つ
+    let track: [PitchPoint]
+    
+    /// サーバが debug を返しても壊れないように受け口だけ用意
+    let debug: JSONValue?
+    
+    enum CodingKeys: String, CodingKey {
+        case algo, sr, hop, track, debug
+        case frameLen = "frame_len"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        
+        algo = try? c.decode(String.self, forKey: .algo)
+        sr = try? c.decode(Int.self, forKey: .sr)
+        hop = try? c.decode(Int.self, forKey: .hop)
+        frameLen = try? c.decode(Int.self, forKey: .frameLen)
+        debug = try? c.decode(JSONValue.self, forKey: .debug)
+        
+        // 1) 通常：[{...},{...}]
+        if let points = try? c.decode([PitchPoint].self, forKey: .track) {
+            track = points
+            return
+        }
+        
+        // 2) たまに：[[{...},{...}]] みたいに二重で包まれる
+        if let nested = try? c.decode([[PitchPoint]].self, forKey: .track) {
+            track = nested.flatMap { $0 }
+            return
+        }
+        
+        // 3) さらに変形：[[t,f0]...] or [[[...]]] 等が来ても落ちないように最後は空配列
+        //    (PitchPoint は配列形式も decode できるようにしてる)
+        if let nested2 = try? c.decode([[[PitchPoint]]].self, forKey: .track) {
+            track = nested2.flatMap { $0 }.flatMap { $0 }
+            return
+        }
+        
+        track = []
+    }
+}
+
 struct PitchPoint: Decodable {
     let t: Double?
     let f0Hz: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case t
+        case f0Hz = "f0_hz"
+    }
     
     init(t: Double?, f0Hz: Double?) {
         self.t = t
         self.f0Hz = f0Hz
     }
     
-    enum CodingKeys: String, CodingKey { case t; case f0Hz = "f0_hz" }
-    
     init(from decoder: Decoder) throws {
+        // A) 通常：{"t":..., "f0_hz":...}
         if let c = try? decoder.container(keyedBy: CodingKeys.self) {
-            self.t = try c.decodeIfPresent(Double.self, forKey: .t)
-            self.f0Hz = try c.decodeIfPresent(Double.self, forKey: .f0Hz)
+            let t = try? c.decodeIfPresent(Double.self, forKey: .t)
+            let f0 = try? c.decodeIfPresent(Double.self, forKey: .f0Hz)
+            self.init(t: t, f0Hz: f0)
             return
         }
-        var u = try decoder.unkeyedContainer()
-        self.t = u.isAtEnd ? nil : try u.decode(Double?.self)
-        self.f0Hz = u.isAtEnd ? nil : try u.decode(Double?.self)
-    }
-}
-
-enum JSONAny: Decodable {
-    case null
-    case bool(Bool)
-    case int(Int)
-    case double(Double)
-    case string(String)
-    case array([JSONAny])
-    case object([String: JSONAny])
-    
-    init(from decoder: Decoder) throws {
-        if let c = try? decoder.singleValueContainer() {
-            if c.decodeNil() { self = .null; return }
-            if let v = try? c.decode(Bool.self) { self = .bool(v); return }
-            if let v = try? c.decode(Int.self) { self = .int(v); return }
-            if let v = try? c.decode(Double.self) { self = .double(v); return }
-            if let v = try? c.decode(String.self) { self = .string(v); return }
-        }
-        if var a = try? decoder.unkeyedContainer() {
-            var arr: [JSONAny] = []
-            while !a.isAtEnd { arr.append(try a.decode(JSONAny.self)) }
-            self = .array(arr)
-            return
-        }
-        let o = try decoder.container(keyedBy: AnyKey.self)
-        var dict: [String: JSONAny] = [:]
-        for k in o.allKeys { dict[k.stringValue] = try o.decode(JSONAny.self, forKey: k) }
-        self = .object(dict)
-    }
-    
-    var doubleValue: Double? {
-        switch self {
-        case .double(let v): return v
-        case .int(let v): return Double(v)
-        case .string(let s): return Double(s)
-        default: return nil
-        }
-    }
-    
-    private struct AnyKey: CodingKey {
-        var stringValue: String
-        init?(stringValue: String) { self.stringValue = stringValue }
-        var intValue: Int? = nil
-        init?(intValue: Int) { return nil }
-    }
-}
-
-struct PitchTrack: Decodable {
-    let algo: String?
-    let sr: Int?
-    let hop: Int?
-    let track: [PitchPoint]?
-    
-    enum CodingKeys: String, CodingKey { case algo, sr, hop, track }
-    
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.algo = try c.decodeIfPresent(String.self, forKey: .algo)
-        self.sr   = try c.decodeIfPresent(Int.self, forKey: .sr)
-        self.hop  = try c.decodeIfPresent(Int.self, forKey: .hop)
         
-        // track は形がブレるので “生のJSON” として取る
-        if let raw = try? c.decodeIfPresent(JSONAny.self, forKey: .track) {
-            self.track = PitchTrack.parseTrack(raw)
+        // B) 変形： [t, f0] または [f0, t] みたいな配列で来るケースを救う
+        var u = try decoder.unkeyedContainer()
+        let a = try? u.decodeIfPresent(Double.self) // 1つ目
+        let b = try? u.decodeIfPresent(Double.self) // 2つ目
+        
+        // 推定：t は通常 0〜数百秒、f0 は 0〜1000Hz くらい
+        // a が 50 より大きければ f0 っぽい、そうでなければ t っぽい…という雑な推定
+        if let a, a > 50 {
+            // [f0, t]
+            self.init(t: b, f0Hz: a)
         } else {
-            self.track = nil
+            // [t, f0]
+            self.init(t: a, f0Hz: b)
         }
-    }
-    
-    // track の JSON を [PitchPoint] に正規化
-    private static func parseTrack(_ raw: JSONAny) -> [PitchPoint]? {
-        // 1) [ {t,f0_hz}, ... ] or [ [t,f0], ... ]
-        if case .array(let arr) = raw {
-            // 2次元の可能性： [[...],[...]] なら平坦化
-            let flattened: [JSONAny]
-            if arr.count > 0, case .array = arr[0] {
-                flattened = arr.flatMap { item -> [JSONAny] in
-                    if case .array(let inner) = item { return inner }
-                    return [item]
-                }
-            } else {
-                flattened = arr
-            }
-            
-            let points: [PitchPoint] = flattened.compactMap { item in
-                // dict形式
-                if case .object(let obj) = item {
-                    let t = obj["t"]?.doubleValue
-                    let f0 = (obj["f0_hz"] ?? obj["f0Hz"])?.doubleValue
-                    return PitchPoint(t: t, f0Hz: f0)
-                }
-                // [t,f0]形式
-                if case .array(let pair) = item {
-                    let t = pair.count > 0 ? pair[0].doubleValue : nil
-                    let f0 = pair.count > 1 ? pair[1].doubleValue : nil
-                    return PitchPoint(t: t, f0Hz: f0)
-                }
-                return nil
-            }
-            return points
-        }
-        return nil
     }
 }
 
 struct PitchEvent: Decodable, Identifiable {
-    /// JSONには無いので decode 対象外（CodingKeysに入れない）
     let id = UUID()
-    
     let start: Double?
     let end: Double?
     let type: String?
@@ -147,129 +180,28 @@ struct PitchEvent: Decodable, Identifiable {
     }
 }
 
-// MARK: - Summary / Meta
+// ==================================================
+// MARK: - JSONValue (debug用：Any対応)
+// ==================================================
 
-/// ✅ 今サーバが返している summary 形式に合わせる
-/// - tips: [String]（あなたのログは配列）
-/// - tol_cents などはそのまま
-///
-/// ※ 将来スコア系（percentWithinTol 等）を追加しても Optional なので壊れにくい
-struct AnalysisSummary: Decodable {
-    let tolCents: Double?
-    let frames: Int?
-    let seconds: Double?
+enum JSONValue: Decodable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
     
-    let meanCents: Double?
-    let medianCents: Double?
-    let stdCents: Double?
-    
-    let percentWithinTol: Double?
-    let percentLow: Double?
-    let percentHigh: Double?
-    
-    let p10Cents: Double?
-    let p90Cents: Double?
-    
-    let unvoicedMissSeconds: Double?
-    
-    let verdict: String?
-    let reason: String?
-    
-    /// ✅ ここが旧モデルと違う：配列
-    let tips: [String]?
-    
-    enum CodingKeys: String, CodingKey {
-        case tolCents = "tol_cents"
-        case frames, seconds
-        case meanCents = "mean_cents"
-        case medianCents = "median_cents"
-        case stdCents = "std_cents"
-        case percentWithinTol = "percent_within_tol"
-        case percentLow = "percent_low"
-        case percentHigh = "percent_high"
-        case p10Cents = "p10_cents"
-        case p90Cents = "p90_cents"
-        case unvoicedMissSeconds = "unvoiced_miss_seconds"
-        case verdict, reason, tips
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        
+        if c.decodeNil() { self = .null; return }
+        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+        if let v = try? c.decode(Double.self) { self = .number(v); return }
+        if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
+        if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
+        
+        self = .null
     }
-}
-
-/// meta.counts が辞書っぽい構造なので型を用意
-struct AnalysisCounts: Decodable {
-    let events: Int?
-    let refTrack: Int?
-    let usrTrack: Int?
-    
-    enum CodingKeys: String, CodingKey {
-        case events
-        case refTrack = "ref_track"
-        case usrTrack = "usr_track"
-    }
-}
-
-struct AnalysisMeta: Decodable {
-    /// ✅ サーバは paths を「任意キーの辞書」で返している
-    let paths: [String: String]?
-    let counts: AnalysisCounts?
-}
-
-// MARK: - AnalysisResponse
-
-/// ✅ /api/analysis の現行レスポンスに合わせる
-/// あなたのログには ok / session_id / song_id / user_id / ref_pitch / usr_pitch / events / summary / meta がある
-struct AnalysisResponse: Decodable {
-    let ok: Bool
-    let message: String?
-    
-    let sessionId: String?
-    let songId: String?
-    let userId: String?
-    
-    let events: [PitchEvent]?
-    let summary: AnalysisSummary?
-    
-    let usrPitch: PitchTrack?
-    let refPitch: PitchTrack?
-    
-    let meta: AnalysisMeta?
-    
-    enum CodingKeys: String, CodingKey {
-        case ok
-        case message
-        
-        case sessionId = "session_id"
-        case songId = "song_id"
-        case userId = "user_id"
-        
-        case events
-        case summary
-        
-        case usrPitch = "usr_pitch"
-        case refPitch = "ref_pitch"
-        
-        case meta
-    }
-}
-
-// MARK: - AI Comment
-
-struct AICommentResponse: Decodable {
-    let ok: Bool
-    let title: String?
-    let body: String?
-    let message: String?
-}
-
-struct AICommentRequest: Encodable {
-    let stats: AICommentStats
-}
-
-struct AICommentStats: Encodable {
-    let tolCents: Double
-    let percentWithinTol: Double
-    let meanAbsCents: Double
-    let sampleCount: Int
-    let scoreStrict: Double
-    let scoreOctaveInvariant: Double
-    let octaveInvariantNow: Bool
 }

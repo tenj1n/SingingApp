@@ -13,7 +13,7 @@ final class UserAPI {
     private init() {}
     
     func createUser(displayName: String?) async throws -> String {
-        let base = AnalysisAPI.shared.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let base = APIClient.shared.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let url = URL(string: "\(base)/api/users")!
         
         var req = URLRequest(url: url)

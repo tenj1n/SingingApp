@@ -116,7 +116,7 @@ final class GrowthViewModel: ObservableObject {
     // =========================================================
     private func fetchAllHistory() async throws -> [GrowthHistoryItem] {
         // 実機の場合 127.0.0.1 は iPhone を指すので注意
-        let url = AnalysisAPI.shared.baseURL
+        let url = APIClient.shared.baseURL
             .appendingPathComponent("api")
             .appendingPathComponent("history")
             .appendingPathComponent(userId)

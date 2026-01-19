@@ -3,15 +3,22 @@ import Charts
 
 struct CompareView: View {
     
+    // total = usrPitch.track.count
+    private func totalSampleCount(_ a: AnalysisResponse) -> Int {
+        a.usrPitch?.track.count ?? 0
+    }
+    
+    // effective = f0_hz が nil じゃない点の数（声が出てる判定）
+    private func effectiveSampleCount(_ a: AnalysisResponse) -> Int {
+        (a.usrPitch?.track ?? []).reduce(0) { $0 + (($1.f0Hz == nil) ? 0 : 1) }
+    }
+    
     // ==================================================
     // 基本情報
     // ==================================================
     private let sessionId: String
     
-    // ✅ 注入もできるように StateObject を init で差し替え可能にする
     @StateObject private var vm: CompareViewModel
-    
-    // ✅ 注入時は自動ロードしない
     private let autoLoadOnAppear: Bool
     
     // ==================================================
@@ -22,14 +29,14 @@ struct CompareView: View {
     @State private var maxErrorPlotPoints: Int = 1200
     @State private var maxOverlayPlotPoints: Int = 2500
     
-    // ✅ 追加：サンプル不足判定（評価を出す最低サンプル数）
+    // ✅ 評価を出す最低サンプル数（vm.sampleCount は density 無しの“信頼用”）
     private let minSampleCountForEvaluation = 200
     
-    // ✅ 追加：ピッチ線の「飛び」を線で繋いで誤解しないため（これ以上空いたら線を切る）
+    // ✅ ピッチ線のギャップを切る（無音を線で繋がない）
     private let overlayGapSec = 0.25
     
     // ==================================================
-    // ✅ 通常モード（従来）: CompareView が自分でロードする
+    // 通常モード: CompareView が自分でロードする
     // ==================================================
     init(sessionId: String = "orphans/user01") {
         self.sessionId = sessionId
@@ -38,7 +45,7 @@ struct CompareView: View {
     }
     
     // ==================================================
-    // ✅ 注入モード: 外から CompareViewModel を渡す（AnalyzeFlow用）
+    // 注入モード: 外から CompareViewModel を渡す（AnalyzeFlow用）
     // ==================================================
     init(sessionId: String, viewModel: CompareViewModel) {
         self.sessionId = sessionId
@@ -52,9 +59,7 @@ struct CompareView: View {
                 .navigationTitle("結果")
         }
         .onAppear {
-            // ✅ 注入モードでは絶対に load() しない
             guard autoLoadOnAppear else { return }
-            
             if vm.analysis == nil && !vm.isLoading {
                 vm.load(sessionId: sessionId)
             }
@@ -75,7 +80,6 @@ struct CompareView: View {
         if vm.isLoading {
             ProgressView("解析情報を読み込み中…")
                 .padding()
-            
         } else if let err = vm.errorMessage {
             VStack(spacing: 12) {
                 Text("取得に失敗しました").font(.headline)
@@ -91,7 +95,6 @@ struct CompareView: View {
                 }
             }
             .padding()
-            
         } else if let a = vm.analysis {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -100,20 +103,16 @@ struct CompareView: View {
                     settingsSection(a)
                     
                     Divider()
-                    
                     pitchOverlaySection(a)
                     
                     Divider()
-                    
                     errorCentsSection(a)
                     
                     Divider()
-                    
                     eventsPreviewSection(a)
                 }
                 .padding()
             }
-            
         } else {
             VStack(spacing: 12) {
                 Text("解析結果がありません").font(.headline)
@@ -137,7 +136,11 @@ struct CompareView: View {
     private func summarySection(_ a: AnalysisResponse) -> some View {
         let eventCount = a.events?.count ?? 0
         let tol = a.summary?.tolCents ?? 40.0
+        
         let lowConfidence = vm.sampleCount < minSampleCountForEvaluation
+        
+        let total = totalSampleCount(a)
+        let effective = effectiveSampleCount(a)
         
         return VStack(alignment: .leading, spacing: 8) {
             Text("比較結果概要").font(.title3.bold())
@@ -163,15 +166,15 @@ struct CompareView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            // ✅ lowConfidenceでも “抑止” ではなく “注意表示”
-            if lowConfidence {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("声検出不足のため、評価の信頼性が低いです（参考表示）")
-                        .font(.subheadline.weight(.semibold))
-                    Text("有効サンプル数が少ない状態では、外音やノイズの誤検出でスコアやズレが不正確になりやすいです。マイクを近づける／声量を上げる／イヤホン使用などを試してください。")
+            // ✅ デバッグ用：点数が 0 のときの切り分け表示（本番で邪魔なら消す）
+            if vm.score100 <= 0.01 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("デバッグ: score=0 の原因確認")
+                        .font(.caption.weight(.semibold))
+                    Text("vm.sampleCount=\(vm.sampleCount), meanAbs=\(vm.meanAbsCents, specifier: "%.2f"), within=\(vm.percentWithinTol * 100, specifier: "%.1f")%")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Text("有効サンプル数: \(vm.sampleCount)（目安: \(minSampleCountForEvaluation)以上）")
+                    Text("usr effective=\(effective) / total=\(total)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -180,27 +183,21 @@ struct CompareView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             
-            if let paths = a.meta?.paths {
-                if let ref = paths["ref_pitch"] {
-                    Text("参照ピッチ：\(ref)")
+            // ✅ lowConfidenceでも “抑止” ではなく “注意表示”
+            if lowConfidence {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("声検出不足のため、評価の信頼性が低いです（参考表示）")
+                        .font(.subheadline.weight(.semibold))
+                    Text("有効サンプル数が少ない状態では、外音やノイズの誤検出でスコアやズレが不正確になりやすいです。マイクを近づける／声量を上げる／イヤホン使用などを試してください。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("有効サンプル数: \(effective) / \(total)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if let usr = paths["usr_pitch"] {
-                    Text("自分ピッチ：\(usr)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let events = paths["events"] {
-                    Text("イベント：\(events)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let summary = paths["summary"] {
-                    Text("サマリー：\(summary)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
         .padding(12)
@@ -343,6 +340,7 @@ struct CompareView: View {
             var prevT: Double? = nil
             for p in pts {
                 if let prev = prevT, (p.time - prev) > overlayGapSec {
+                    // nil を差し込んで線を切る
                     out.append(.init(time: p.time, midi: nil, series: p.series))
                 }
                 out.append(p)
@@ -379,7 +377,7 @@ struct CompareView: View {
                 Text("ピッチデータがありません").foregroundStyle(.secondary)
             } else {
                 Chart {
-                    // 歌手：線
+                    // ✅ 歌手：線
                     ForEach(refPts) { p in
                         if let m = p.midi {
                             LineMark(
@@ -391,16 +389,15 @@ struct CompareView: View {
                         }
                     }
                     
-                    // 自分：点
+                    // ✅ 自分：点→線に変更（要望対応）
                     ForEach(usrPts) { p in
                         if let m = p.midi {
-                            PointMark(
+                            LineMark(
                                 x: .value("時間（秒）", p.time),
                                 y: .value("音程（ノート）", m)
                             )
-                            .symbolSize(12)
                             .foregroundStyle(by: .value("系列", usrSeries))
-                            .opacity(0.9)
+                            .interpolationMethod(.linear)
                         }
                     }
                 }
@@ -431,14 +428,11 @@ struct CompareView: View {
         let tol = a.summary?.tolCents ?? 40.0
         let lowConfidence = vm.sampleCount < minSampleCountForEvaluation
         
-        // vm.errorPoints -> plot用に変換
         var raw: [ErrorPlotPoint] = vm.errorPoints.map { .init(time: $0.time, cents: $0.cents) }
         raw.sort { $0.time < $1.time }
         
-        // 軽量化：maxErrorPlotPoints へ間引き
         let down = downsampleToMax(raw, maxPoints: maxErrorPlotPoints)
         
-        // 「許容外のみ」
         let filtered: [ErrorPlotPoint]
         if showOnlyOutOfTol {
             filtered = down.filter { abs($0.cents) > tol }
@@ -446,7 +440,6 @@ struct CompareView: View {
             filtered = down
         }
         
-        // 傾向線（平均）：ざっくり区間平均で線を引く
         let trend: [TrendPoint] = {
             guard showTrendLine, !filtered.isEmpty else { return [] }
             let bins = 24
@@ -492,12 +485,10 @@ struct CompareView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Chart {
-                    // 0ライン
                     RuleMark(y: .value("0", 0))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         .foregroundStyle(.secondary)
                     
-                    // tolライン（上下）
                     RuleMark(y: .value("+tol", tol))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                         .foregroundStyle(.secondary)
@@ -505,7 +496,6 @@ struct CompareView: View {
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                         .foregroundStyle(.secondary)
                     
-                    // 点
                     ForEach(filtered) { p in
                         PointMark(
                             x: .value("時間（秒）", p.time),
@@ -514,7 +504,6 @@ struct CompareView: View {
                         .symbolSize(10)
                     }
                     
-                    // 傾向線
                     if showTrendLine, trend.count >= 2 {
                         ForEach(trend) { tp in
                             LineMark(

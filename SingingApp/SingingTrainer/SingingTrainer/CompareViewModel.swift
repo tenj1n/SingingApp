@@ -18,14 +18,14 @@ final class CompareViewModel: ObservableObject {
     @Published private(set) var errorPoints: [ErrorPoint] = []
     
     // -------- 指標 --------
-    @Published private(set) var sampleCount: Int = 0              // ✅ 信頼性判定用（density非依存）
+    @Published private(set) var sampleCount: Int = 0
     @Published private(set) var score100: Double = 0
     @Published private(set) var score100Strict: Double = 0
     @Published private(set) var score100OctaveInvariant: Double = 0
     @Published private(set) var percentWithinTol: Double = 0
     @Published private(set) var meanAbsCents: Double = 0
     
-    // -------- AIコメント/履歴（既存UI用）--------
+    // -------- AIコメント/履歴 --------
     @Published var isAICommentLoading = false
     @Published var aiCommentError: String?
     @Published var commentTitle: String = "AIコメント"
@@ -43,7 +43,6 @@ final class CompareViewModel: ObservableObject {
     // MARK: - Public
     // ==================================================
     
-    // CompareView が自分でロードする用（必要なら使う）
     func load(sessionId: String) {
         guard !isLoading else { return }
         isLoading = true
@@ -68,7 +67,6 @@ final class CompareViewModel: ObservableObject {
         load(sessionId: sid)
     }
     
-    // ✅ AnalyzeFlow から注入
     func applyAnalysis(_ decoded: AnalysisResponse, sessionIdFallback: String) {
         self.lastSessionId = decoded.sessionId ?? sessionIdFallback
         
@@ -143,7 +141,6 @@ final class CompareViewModel: ObservableObject {
             return
         }
         
-        // dtの基準（density無し）
         let refDtBase = Self.estimateDt(sr: a.refPitch?.sr, hop: a.refPitch?.hop)
         let usrDtBase = Self.estimateDt(sr: a.usrPitch?.sr, hop: a.usrPitch?.hop)
         var dtBase = min(refDtBase, usrDtBase)
@@ -152,7 +149,7 @@ final class CompareViewModel: ObservableObject {
         let refInterp = LinearInterp(track: refS)
         let usrInterp = LinearInterp(track: usrS)
         
-        // ✅ まず sampleCount は density 無しの dtBase で数える（信頼性判定用）
+        // 信頼性判定用（density 無し）
         var validForConfidence: Int = 0
         do {
             var t = t0
@@ -167,7 +164,7 @@ final class CompareViewModel: ObservableObject {
         }
         self.sampleCount = validForConfidence
         
-        // ✅ 表示用は density を掛けた dt
+        // 表示用（density 反映）
         var dt = dtBase * Double(density.multiplier)
         
         var aligned: [AlignedPoint] = []
@@ -185,12 +182,27 @@ final class CompareViewModel: ObservableObject {
         
         let valid = aligned.filter { $0.refVoiced && $0.usrVoiced }
         
+        // --------------------------------------------------
+        // ✅ octaveInvariant が ON のときは、
+        //    overlay(usr) と error(usr-ref) の両方で
+        //    usrHz を “refHz に近いオクターブ” に寄せる
+        // --------------------------------------------------
+        
         // overlayPoints
         var ov: [OverlayPoint] = []
         ov.reserveCapacity(aligned.count * 2)
+        
         for p in aligned {
-            ov.append(.init(time: p.t, midi: p.refHz.flatMap { PitchMath.hzToMidi($0) }, series: .ref))
-            ov.append(.init(time: p.t, midi: p.usrHz.flatMap { PitchMath.hzToMidi($0) }, series: .usr))
+            let refMidi = p.refHz.flatMap { PitchMath.hzToMidi($0) }
+            
+            var usrHzForOverlay = p.usrHz
+            if octaveInvariant, let rhz = p.refHz, let uhz = p.usrHz {
+                usrHzForOverlay = PitchMath.shiftUsrHzToClosestOctave(refHz: rhz, usrHz: uhz)
+            }
+            let usrMidi = usrHzForOverlay.flatMap { PitchMath.hzToMidi($0) }
+            
+            ov.append(.init(time: p.t, midi: refMidi, series: .ref))
+            ov.append(.init(time: p.t, midi: usrMidi, series: .usr))
         }
         self.overlayPoints = ov
         
@@ -203,12 +215,18 @@ final class CompareViewModel: ObservableObject {
         
         for p in valid {
             guard let rhz = p.refHz, let uhz = p.usrHz else { continue }
-            let cents = PitchMath.centsDiff(refHz: rhz, usrHz: uhz)
-            let centsOI = octaveInvariant ? PitchMath.wrapCentsToOctave(cents) : cents
             
-            errs.append(.init(time: p.t, cents: centsOI))
+            let usrHzAligned: Double
+            if octaveInvariant {
+                usrHzAligned = PitchMath.shiftUsrHzToClosestOctave(refHz: rhz, usrHz: uhz)
+            } else {
+                usrHzAligned = uhz
+            }
             
-            let absV = abs(centsOI)
+            let cents = PitchMath.centsDiff(refHz: rhz, usrHz: usrHzAligned)
+            errs.append(.init(time: p.t, cents: cents))
+            
+            let absV = abs(cents)
             absCentsSum += absV
             if absV <= tol { withinTolCount += 1 }
         }
@@ -218,10 +236,12 @@ final class CompareViewModel: ObservableObject {
         self.meanAbsCents = absCentsSum / Double(n)
         self.percentWithinTol = Double(withinTolCount) / Double(n)
         
+        // スコア（今の PitchMath 設定をそのまま使う）
         self.score100 = PitchMath.scoreFromMeanAbsCents(meanAbsCents: meanAbsCents)
         
+        // 表示用の2種（今のUIの “通常/オクターブ無視” 表示を維持）
         if octaveInvariant {
-            let strictMean = Self.computeMeanAbsCentsStrict(valid: valid)
+            let strictMean = Self.computeMeanAbsCentsStrict(valid: valid) // ここは “無視しない” 平均
             self.score100Strict = PitchMath.scoreFromMeanAbsCents(meanAbsCents: strictMean)
             self.score100OctaveInvariant = self.score100
         } else {
@@ -245,7 +265,6 @@ final class CompareViewModel: ObservableObject {
         Task { @MainActor in
             defer { isAICommentLoading = false }
             do {
-                // ★あなたの既存APIに合わせて修正
                 let res = try await APIClient.shared.generateAIComment(sessionId: sid)
                 self.commentTitle = res.title ?? "AIコメント"
                 self.commentBody = res.body ?? ""
@@ -260,6 +279,9 @@ final class CompareViewModel: ObservableObject {
     
     func saveAICommentToHistory() {
         guard let sid = lastSessionId else { return }
+        
+        print("[SAVE] didGenerateAIComment=\(didGenerateAIComment) bodyLen=\(commentBody.count) titleLen=\(commentTitle.count) sid=\(sid)")
+        
         guard !commentBody.isEmpty else { return }
         guard didGenerateAIComment else { return }
         guard !isHistorySaving else { return }
@@ -270,14 +292,24 @@ final class CompareViewModel: ObservableObject {
         Task { @MainActor in
             defer { isHistorySaving = false }
             do {
-                // ★あなたの既存APIに合わせて修正
-                _ = try await APIClient.shared.appendHistory(sessionId: sid, title: commentTitle, body: commentBody)
+                let req = HistorySaveRequest(
+                    title: commentTitle,
+                    body: commentBody,
+                    score100: score100,
+                    score100Strict: score100Strict,
+                    score100OctaveInvariant: score100OctaveInvariant,
+                    meanAbsCents: meanAbsCents,
+                    percentWithinTol: percentWithinTol,
+                    sampleCount: sampleCount
+                )
+                _ = try await APIClient.shared.appendHistory(sessionId: sid, reqBody: req, commentSource: .ai)
                 self.isHistorySaved = true
             } catch {
                 self.historySaveError = error.localizedDescription
             }
         }
     }
+
     
     // ==================================================
     // MARK: - Helpers
@@ -305,7 +337,8 @@ final class CompareViewModel: ObservableObject {
         var n: Int = 0
         for p in valid {
             guard let rhz = p.refHz, let uhz = p.usrHz else { continue }
-            let cents = PitchMath.wrapCentsToOctave(PitchMath.centsDiff(refHz: rhz, usrHz: uhz))
+            let u2 = PitchMath.shiftUsrHzToClosestOctave(refHz: rhz, usrHz: uhz)
+            let cents = PitchMath.centsDiff(refHz: rhz, usrHz: u2)
             sum += abs(cents)
             n += 1
         }
@@ -314,32 +347,8 @@ final class CompareViewModel: ObservableObject {
 }
 
 // ==================================================
-// MARK: - Types
+// MARK: - Local types
 // ==================================================
-
-enum Density: Int, CaseIterable, Identifiable {
-    case x1 = 1, x2 = 2, x5 = 5, x10 = 10, x20 = 20, x50 = 50
-    var id: Int { rawValue }
-    var label: String { "×\(rawValue)" }
-    var multiplier: Int { rawValue }
-}
-
-struct OverlayPoint: Identifiable {
-    enum Series: String {
-        case ref = "歌手"
-        case usr = "自分"
-    }
-    let id = UUID()
-    let time: Double
-    let midi: Double?
-    let series: Series
-}
-
-struct ErrorPoint: Identifiable {
-    let id = UUID()
-    let time: Double
-    let cents: Double
-}
 
 private struct TimedF0 {
     let t: Double
@@ -383,29 +392,5 @@ private struct LinearInterp {
         guard let f0 = f[i0], let f1 = f[i1] else { return nil }
         let r = (x - t0) / (t1 - t0)
         return f0 + (f1 - f0) * r
-    }
-}
-
-enum PitchMath {
-    static func hzToMidi(_ hz: Double) -> Double {
-        guard hz > 0 else { return 0 }
-        return 69.0 + 12.0 * log2(hz / 440.0)
-    }
-    
-    static func centsDiff(refHz: Double, usrHz: Double) -> Double {
-        guard refHz > 0, usrHz > 0 else { return 0 }
-        return 1200.0 * log2(usrHz / refHz)
-    }
-    
-    static func wrapCentsToOctave(_ cents: Double) -> Double {
-        var x = cents
-        while x > 600 { x -= 1200 }
-        while x < -600 { x += 1200 }
-        return x
-    }
-    
-    static func scoreFromMeanAbsCents(meanAbsCents: Double) -> Double {
-        let x = max(0.0, min(200.0, meanAbsCents))
-        return max(0.0, min(100.0, 100.0 * (1.0 - x / 200.0)))
     }
 }

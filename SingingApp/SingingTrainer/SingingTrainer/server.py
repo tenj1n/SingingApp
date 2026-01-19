@@ -804,13 +804,16 @@ def _build_pitch_track_librosa_pyin(path: Path) -> Dict[str, Any]:
 def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
     algo = (PITCH_ALGO or "").lower().strip()
 
+    # 1) librosa_pyin
     if algo == "librosa_pyin":
         return _build_pitch_track_librosa_pyin(path)
 
+    # 2) wav/m4a 読み込み
     x, sr = load_audio_mono_float(path)
 
+    # 3) yin
     if algo == "yin":
-        track = extract_pitch_track_yin(
+        track, meta = extract_pitch_track_yin(
             x=x,
             sr=sr,
             hop=PITCH_HOP,
@@ -822,6 +825,7 @@ def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
             max_seconds=PITCH_MAX_SECONDS,
         )
 
+        # voiced を meta の voiced に合わせてOK（念のため track からも数える）
         voiced = 0
         for p in track:
             if isinstance(p, dict) and p.get("f0_hz") is not None:
@@ -832,16 +836,54 @@ def build_pitch_track_from_file(path: Path) -> Dict[str, Any]:
             "sr": int(sr),
             "hop": int(PITCH_HOP),
             "frame_len": int(PITCH_FRAME_LEN),
-            "track": track,
+            "track": track,             # ✅ listだけ
             "debug": {
-                "frames": len(track),
-                "voiced": voiced,
+                **(meta or {}),
+                "frames": int(len(track)),
+                "voiced_counted": int(voiced),
                 "energy_th": float(PITCH_ENERGY_TH),
                 "yin_threshold": float(YIN_THRESHOLD),
                 "fmin": float(PITCH_FMIN),
                 "fmax": float(PITCH_FMAX),
             },
         }
+
+    # 4) fft_peak（未実装のままだと None 返して事故るので最低限返す）
+    if algo == "fft_peak":
+        track = extract_pitch_track_fft(
+            x=x,
+            sr=sr,
+            hop=PITCH_HOP,
+            fmin=PITCH_FMIN,
+            fmax=PITCH_FMAX,
+            energy_th=PITCH_ENERGY_TH,
+            max_seconds=PITCH_MAX_SECONDS,
+        )
+        voiced = sum(1 for p in track if isinstance(p, dict) and p.get("f0_hz") is not None)
+        return {
+            "algo": "fft_peak",
+            "sr": int(sr),
+            "hop": int(PITCH_HOP),
+            "frame_len": int(PITCH_HOP * 2),
+            "track": track,
+            "debug": {
+                "frames": int(len(track)),
+                "voiced": int(voiced),
+                "energy_th": float(PITCH_ENERGY_TH),
+                "fmin": float(PITCH_FMIN),
+                "fmax": float(PITCH_FMAX),
+            },
+        }
+
+    # 5) 不明アルゴ
+    return {
+        "algo": algo or "unknown",
+        "sr": int(sr),
+        "hop": int(PITCH_HOP),
+        "frame_len": int(PITCH_FRAME_LEN),
+        "track": [],
+        "debug": {"error": f"unknown PITCH_ALGO={algo}"},
+    }
 
 def get_ref_pitch_for_song(song: SongItem) -> Dict[str, Any]:
     if song.id in _ref_pitch_cache:
@@ -983,6 +1025,8 @@ def create_user():
 @app.post("/api/voice/<user_id>")
 def upload_voice(user_id: str):
     try:
+        import shutil
+
         song_id = (request.args.get("song_id") or "").strip() or "orphans"
 
         up = request.files.get("file")
@@ -993,10 +1037,42 @@ def upload_voice(user_id: str):
         sess_dir = get_session_dir(song_id, user_id, take_id)
         wav_path = sess_dir / "input.wav"
 
-        up.save(wav_path)
+        # ✅ 1) まず queued（受領フェーズ開始）
+        set_status(sess_dir, state="queued", message="uploading")
 
-        # ✅ queued を必ず作る（ここが重要）
-        set_status(sess_dir, state="queued", message="uploaded")
+        # ✅ 2) 確実に全バイト保存（途中欠け対策）
+        up.stream.seek(0)
+        with open(wav_path, "wb") as f:
+            shutil.copyfileobj(up.stream, f)
+
+        saved_bytes = wav_path.stat().st_size
+
+        # ✅ 3) wav として読めるか / 何秒あるか をログ（切り分け最強）
+        dur = None
+        sr = None
+        nframes = None
+        nch = None
+        sw = None
+        try:
+            with wave.open(str(wav_path), "rb") as wf:
+                sr = wf.getframerate()
+                nframes = wf.getnframes()
+                nch = wf.getnchannels()
+                sw = wf.getsampwidth()
+            dur = float(nframes) / float(sr) if (sr and nframes is not None) else None
+        except Exception as we:
+            # wav じゃない/壊れてる場合はここに来る（でも保存自体はできてる）
+            app.logger.warning(f"[UPLOAD] wave.open failed: {we}")
+
+        app.logger.info(
+            f"[UPLOAD] session={song_id}/{user_id}/{take_id} "
+            f"saved={saved_bytes}B req_content_length={request.content_length} "
+            f"wav(sr={sr}, frames={nframes}, dur={dur}, ch={nch}, sw={sw}) "
+            f"filename={up.filename} mimetype={up.mimetype}"
+        )
+
+        # ✅ 4) queued を uploaded に更新
+        set_status(sess_dir, state="queued", message="uploaded", bytes=saved_bytes, dur=dur, sr=sr)
 
         return jsonify({
             "ok": True,
@@ -1005,11 +1081,13 @@ def upload_voice(user_id: str):
             "song_id": song_id,
             "user_id": user_id,
             "take_id": take_id,
+            "bytes": saved_bytes,
+            "dur": dur,
+            "sr": sr,
         })
 
     except Exception as e:
         return json_error(500, "INTERNAL_ERROR", str(e))
-
 # ==================================================
 # API: analyze (RUN ANALYSIS)
 # POST /api/analyze/<session_id>
@@ -1028,8 +1106,6 @@ def analyze_session(session_id: str):
             return json_error(404, "FILE_NOT_FOUND", f"input.wav not found: {wav_path}")
 
         set_status(sess_dir, state="running", message="analyzing")
-        set_status(sess_dir, state="done", message="analyzed")
-        
         analysis = analyze_fft(song_id, user_id, take_id, wav_path)
 
         # ★ None 対策（ここ重要）

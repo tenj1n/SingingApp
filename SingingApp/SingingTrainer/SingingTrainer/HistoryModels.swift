@@ -1,130 +1,116 @@
 import Foundation
 
-struct SimpleOkResponse: Codable {
-    let ok: Bool
-    let message: String?
-}
+// ==================================================
+// MARK: - AI Comment Models
+// ==================================================
 
-struct HistoryItem: Codable, Identifiable {
-    let id: String
-    let songId: String
-    let userId: String
-    let createdAt: String
+struct AICommentRequest: Encodable {
+    var promptVersion: String? = nil
+    var model: String? = nil
     
-    let commentTitle: String
-    let commentBody: String
-    
-    let score100: Double?
-    let score100Strict: Double?
-    let score100OctaveInvariant: Double?
-    let octaveInvariantNow: Bool?
-    
-    let tolCents: Double?
-    let percentWithinTol: Double?
-    let meanAbsCents: Double?
-    let sampleCount: Int?
-    // 研究ログ用
-    let commentSource: String?
-    let promptVersion: String?
-    let model: String?
-    let appVersion: String?
-
     enum CodingKeys: String, CodingKey {
-        case id
-        case songId = "song_id"
-        case userId = "user_id"
-        case createdAt = "created_at"
-        case commentTitle = "comment_title"
-        case commentBody  = "comment_body"
-        case score100
-        case score100Strict = "score100_strict"
-        case score100OctaveInvariant = "score100_octave_invariant"
-        case octaveInvariantNow = "octave_invariant_now"
-        case tolCents = "tol_cents"
-        case percentWithinTol = "percent_within_tol"
-        case meanAbsCents = "mean_abs_cents"
-        case sampleCount = "sample_count"
-        case commentSource = "comment_source"
         case promptVersion = "prompt_version"
         case model
-        case appVersion = "app_version"
-
     }
-    
-    /// CompareView 用のセッションID（song/user）
-    var sessionId: String { "\(songId)/\(userId)" }
-    
-    var createdAtShort: String {
-        // 例: "2025-12-21T03:38:40Z" (UTC) -> "2025-12-21 12:38" (JST)
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds] // 小数秒あり対応
-        iso.timeZone = TimeZone(secondsFromGMT: 0) // Z(UTC)として解釈
-        
-        // 小数秒なしの形式も来るのでフォールバック
-        let date: Date? = iso.date(from: createdAt) ?? {
-            let iso2 = ISO8601DateFormatter()
-            iso2.formatOptions = [.withInternetDateTime]
-            iso2.timeZone = TimeZone(secondsFromGMT: 0)
-            return iso2.date(from: createdAt)
-        }()
-        
-        guard let d = date else {
-            // パースできなかった時の保険（従来方式）
-            let s = createdAt.replacingOccurrences(of: "T", with: " ")
-            return String(s.prefix(16))
-        }
-        
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "ja_JP")
-        fmt.timeZone = TimeZone.current // 端末のタイムゾーン（日本ならJST）
-        fmt.dateFormat = "yyyy-MM-dd HH:mm"
-        return fmt.string(from: d)
-    }
-    var experimentShort: String {
-        let pv = promptVersion ?? "-"
-        let m  = model ?? "-"
-        if let av = appVersion, !av.isEmpty {
-            return "\(createdAtShort)  \(pv) / \(m)  app \(av)"
-        } else {
-            return "\(createdAtShort)  \(pv) / \(m)"
-        }
-    }
-
 }
 
-struct HistoryListResponse: Codable {
-    let ok: Bool
-    let userId: String?
-    let items: [HistoryItem]
-    let message: String?
+struct AICommentResponse: Decodable {
+    let ok: Bool?
+    let title: String?
+    let body: String?
+    let model: String?
+    let promptVersion: String?
     
     enum CodingKeys: String, CodingKey {
-        case ok
-        case userId = "user_id"
-        case items
-        case message
+        case ok, title, body, model
+        case promptVersion = "prompt_version"
     }
 }
 
-struct HistorySaveRequest: Codable {
-    let commentTitle: String
-    let commentBody: String
+// ==================================================
+// MARK: - History Save / List / Delete Models
+// ==================================================
+
+import Foundation
+
+struct HistorySaveRequest: Encodable {
+    var title: String
+    var body: String
     
-    let score100: Double
-    let score100Strict: Double
-    let score100OctaveInvariant: Double
-    let octaveInvariantNow: Bool
+    var score100: Double? = nil
+    var score100Strict: Double? = nil
+    var score100OctaveInvariant: Double? = nil
+    var meanAbsCents: Double? = nil
+    var percentWithinTol: Double? = nil
+    var sampleCount: Int? = nil
     
-    let tolCents: Double
-    let percentWithinTol: Double
-    let meanAbsCents: Double
-    let sampleCount: Int
+    enum CodingKeys: String, CodingKey {
+        // ✅ サーバが欲しいキーに合わせる
+        case title = "commentTitle"
+        case body  = "commentBody"
+        
+        // ✅ snake_case はそのまま維持（サーバ側が snake_case っぽいので）
+        case score100 = "score100"
+        case score100Strict = "score100_strict"
+        case score100OctaveInvariant = "score100_octave_invariant"
+        case meanAbsCents = "mean_abs_cents"
+        case percentWithinTol = "percent_within_tol"
+        case sampleCount = "sample_count"
+    }
 }
 
-struct HistorySaveResponse: Codable {
-    let ok: Bool
-    let item: HistoryItem?
+struct HistorySaveResponse: Decodable {
+    let ok: Bool?
+    let message: String?
+    let historyId: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case ok, message
+        case historyId = "history_id"
+    }
+}
+
+struct HistoryListResponse: Decodable {
+    let ok: Bool?
+    let message: String?
+    let items: [HistoryItem]?   // ✅ 配列
+    
+    struct HistoryItem: Decodable, Identifiable {
+        let id: String
+        let songId: String?
+        let createdAt: String?
+        let source: String?
+        let title: String?
+        let body: String?
+        
+        let score100: Double?
+        let score100Strict: Double?
+        let score100OctaveInvariant: Double?
+        let meanAbsCents: Double?
+        let percentWithinTol: Double?
+        let sampleCount: Int?
+        
+        let sessionId: String?
+        
+        enum CodingKeys: String, CodingKey {
+            case id
+            case songId = "song_id"
+            case createdAt = "created_at"
+            case source, title, body
+            
+            case score100 = "score100"
+            case score100Strict = "score100_strict"
+            case score100OctaveInvariant = "score100_octave_invariant"
+            case meanAbsCents = "mean_abs_cents"
+            case percentWithinTol = "percent_within_tol"
+            case sampleCount = "sample_count"
+            
+            case sessionId = "session_id"
+        }
+    }
+}
+
+struct SimpleOkResponse: Decodable {
+    let ok: Bool?
     let message: String?
 }
-// AnalysisAPI側が使ってる古い名前の互換（append = save と同じレスポンス扱い）
-typealias HistoryAppendResponse = HistorySaveResponse

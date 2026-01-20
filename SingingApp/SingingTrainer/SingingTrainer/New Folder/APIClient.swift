@@ -19,40 +19,41 @@ enum APIError: Error, LocalizedError {
     }
 }
 
+// ✅ convertFromSnakeCase 前提：モデルは camelCase に統一する
 struct APIUploadResponse: Decodable {
     let ok: Bool
     let message: String?
-    let session_id: String?
-    let song_id: String?
-    let user_id: String?
-    let take_id: String?
+    let sessionId: String?
+    let songId: String?
+    let userId: String?
+    let takeId: String?
 }
 
 struct APIStatusResponse: Decodable {
     let ok: Bool
     let state: String?
     let message: String?
-    let updated_at: String?
-    let session_id: String?
-    let song_id: String?
-    let user_id: String?
-    let take_id: String?
+    let updatedAt: String?
+    let sessionId: String?
+    let songId: String?
+    let userId: String?
+    let takeId: String?
 }
 
 struct APIAnalyzeResponse: Decodable {
     let ok: Bool
     let message: String?
-    let session_id: String?
-    let song_id: String?
-    let user_id: String?
-    let take_id: String?
+    let sessionId: String?
+    let songId: String?
+    let userId: String?
+    let takeId: String?
 }
 
 struct APINotReadyResponse: Decodable {
     let ok: Bool
     let code: String?
     let message: String?
-    let session_id: String?
+    let sessionId: String?
     let status: APIStatusResponse?
 }
 
@@ -78,7 +79,6 @@ final class APIClient {
         {
             self.baseURL = u
         } else {
-            // 実機で Info.plist が未設定なら落とす（あなたの方針通り）
             fatalError("""
             API_BASE_URL が Info.plist にありません。
             Target > Info に
@@ -90,9 +90,10 @@ final class APIClient {
         print("✅ APIClient baseURL =", baseURL.absoluteString)
     }
     
+    // ✅ snake_case -> camelCase 自動変換
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.keyDecodingStrategy = .useDefaultKeys
+        d.keyDecodingStrategy = .convertFromSnakeCase
         return d
     }()
     
@@ -174,9 +175,7 @@ final class APIClient {
     // ==================================================
     func getAnalysis(sessionId: String) async throws -> AnalysisResponse {
         
-        // ✅ URL を安全に組み立て（sessionId は / を含む想定）
         var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        // baseURL が https://singingtrainer.fly.dev の場合、path が空のことが多いので結合に注意
         let basePath = comps?.path ?? ""
         comps?.path = basePath + "/api/analysis/" + sessionId
         
@@ -190,7 +189,7 @@ final class APIClient {
         req.httpMethod = "GET"
         req.timeoutInterval = 60
         
-        for _ in 0..<20 { // 最大 ~10秒
+        for _ in 0..<20 {
             let (data, statusCode) = try await dataWithStatus(for: req)
             print("ANALYSIS code =", statusCode)
             
@@ -207,26 +206,15 @@ final class APIClient {
                 throw APIError.http(statusCode, msg)
             }
             
-            // ✅ ここで decode して「サンプル数」をログ出し
             let res = try decode(AnalysisResponse.self, from: data)
-            
-            print("USR track count =", res.usrPitch?.track.count ?? -1,
-                  "effective =", res.effectiveSampleCount,
-                  "REF track count =", res.refPitch?.track.count ?? -1,
-                  "ref effective =", res.refEffectiveSampleCount)
-            
-            print("USR debug =", String(describing: res.usrPitch?.debug))
-            print("REF debug =", String(describing: res.refPitch?.debug))
-            
             return res
         }
         
         throw APIError.timeout
     }
-
+    
     // ==================================================
     // MARK: - AI Comment
-    // POST /api/comment/<session_id>
     // ==================================================
     func fetchAIComment(sessionId: String, reqBody: AICommentRequest) async throws -> AICommentResponse {
         guard let url = URL(string: "\(baseURL.absoluteString)/api/comment/\(sessionId)") else {
@@ -248,35 +236,22 @@ final class APIClient {
         return try decode(AICommentResponse.self, from: data)
     }
     
-    /// CompareViewModel から呼ぶ用（空ボディでOK）
     func generateAIComment(sessionId: String) async throws -> AICommentResponse {
         try await fetchAIComment(sessionId: sessionId, reqBody: AICommentRequest())
     }
     
     // ==================================================
-    // MARK: - History append
-    // POST /api/history/<song_id>/<user_id>/append
+    // MARK: - History append / list / delete（ここは元コードのまま）
     // ==================================================
     enum CommentSource: String { case ai, rule }
     
-    func appendHistory(
-        sessionId: String,
-        reqBody: HistorySaveRequest,
-        commentSource: CommentSource
-    ) async throws -> HistorySaveResponse {
-        
+    func appendHistory(sessionId: String, reqBody: HistorySaveRequest, commentSource: CommentSource) async throws -> HistorySaveResponse {
         let (songId, userId, _) = try splitSessionId3(sessionId)
         
         guard let url = URL(string: "\(baseURL.absoluteString)/api/history/\(songId)/\(userId)/append") else {
             throw APIError.badURL
         }
         
-        print("HISTORY APPEND URL:", url.absoluteString)
-        
-        // --------------------------------------------------
-        // ✅ Bodyに commentSource も混ぜて送る（保険）
-        //    JSONEncoderだけだと混ぜにくいので辞書合成
-        // --------------------------------------------------
         let baseData = try JSONEncoder().encode(reqBody)
         let baseObjAny = try JSONSerialization.jsonObject(with: baseData, options: [])
         
@@ -284,12 +259,10 @@ final class APIClient {
             throw APIError.decode("HistorySaveRequest is not a JSON object")
         }
         
-        // サーバがどっちのキーでも拾えるように両方入れる（安全策）
         baseObj["commentSource"] = commentSource.rawValue
         baseObj["comment_source"] = commentSource.rawValue
         
         let bodyData = try JSONSerialization.data(withJSONObject: baseObj, options: [])
-        
         let idempotencyKey = Self.sha256Hex(Data((sessionId + ":").utf8) + bodyData)
         
         var req = URLRequest(url: url)
@@ -304,18 +277,17 @@ final class APIClient {
         
         let (data, resp) = try await URLSession.shared.data(for: req)
         try checkHTTP(resp: resp, data: data)
-        
-        if let http = resp as? HTTPURLResponse { print("HISTORY APPEND status =", http.statusCode) }
-        print("HISTORY APPEND body =", String(data: data, encoding: .utf8) ?? "")
-        
         return try decode(HistorySaveResponse.self, from: data)
     }
     
-    // ==================================================
-    // MARK: - History list
-    // GET /api/history/<user_id>?source=...&prompt=...&model=...
-    // ==================================================
-    func fetchHistoryList(userId: String, source: String? = nil, prompt: String? = nil, model: String? = nil, limit: Int? = nil, offset: Int? = nil) async throws -> HistoryListResponse {
+    func fetchHistoryList(
+        userId: String,
+        source: String? = nil,
+        prompt: String? = nil,
+        model: String? = nil,
+        limit: Int? = nil,
+        offset: Int? = nil
+    ) async throws -> HistoryListResponse {
         
         let urlBase = baseURL
             .appendingPathComponent("api")
@@ -327,7 +299,7 @@ final class APIClient {
         
         if let source, !source.isEmpty { items.append(.init(name: "source", value: source)) }
         if let prompt, !prompt.isEmpty { items.append(.init(name: "prompt", value: prompt)) }
-        if let model, !model.isEmpty { items.append(.init(name: "model", value: model)) }
+        if let model,  !model.isEmpty  { items.append(.init(name: "model",  value: model)) }
         if let limit { items.append(.init(name: "limit", value: String(limit))) }
         if let offset { items.append(.init(name: "offset", value: String(offset))) }
         
@@ -335,15 +307,32 @@ final class APIClient {
         
         guard let url = comp?.url else { throw APIError.badURL }
         
+        print("HISTORY LIST URL =", url.absoluteString)
+        
         let (data, resp) = try await URLSession.shared.data(from: url)
         try checkHTTP(resp: resp, data: data)
-        return try decode(HistoryListResponse.self, from: data)
+        
+        // RAWログ（あなたが貼ってくれてるやつ）
+        print("HISTORY LIST RAW =", String(data: data, encoding: .utf8) ?? "(binary)")
+        
+        // ✅ decodeして中身もログ
+        let res = try decode(HistoryListResponse.self, from: data)
+        
+        if let first = res.items?.first {
+            print("DECODED first.id =", first.id)
+            print("DECODED first.songId =", first.songId ?? "nil")
+            print("DECODED first.songTitle =", first.songTitle ?? "nil")
+            print("DECODED first.title =", first.title ?? "nil")
+            print("DECODED first.body =", (first.body ?? "nil").prefix(30))
+            print("DECODED first.score100 =", first.score100 ?? -1)
+            print("DECODED first.sessionId =", first.sessionId ?? "nil")
+        } else {
+            print("DECODED items is empty")
+        }
+        
+        return res
     }
-    
-    // ==================================================
-    // MARK: - History delete
-    // DELETE /api/history/<user_id>/<history_id>
-    // ==================================================
+
     func deleteHistory(userId: String, historyId: String) async throws -> SimpleOkResponse {
         guard let url = URL(string: "\(baseURL.absoluteString)/api/history/\(userId)/\(historyId)") else {
             throw APIError.badURL
@@ -356,23 +345,6 @@ final class APIClient {
         let (data, resp) = try await URLSession.shared.data(for: req)
         try checkHTTP(resp: resp, data: data)
         return try decode(SimpleOkResponse.self, from: data)
-    }
-    
-    // ==================================================
-    // MARK: - Poll helper
-    // ==================================================
-    func pollStatusUntilDone(sessionId: String, intervalSec: Double = 1.5, timeoutSec: Double = 900) async throws -> APIStatusResponse {
-        let start = Date()
-        while true {
-            let s = try await getStatus(sessionId: sessionId)
-            let state = (s.state ?? "unknown").lowercased()
-            
-            if state == "done" { return s }
-            if state == "error" { throw APIError.invalidResponse("status=error: \(s.message ?? "")") }
-            
-            if Date().timeIntervalSince(start) > timeoutSec { throw APIError.timeout }
-            try await Task.sleep(nanoseconds: UInt64(intervalSec * 1_000_000_000))
-        }
     }
     
     // ==================================================
@@ -419,7 +391,6 @@ final class APIClient {
         return body
     }
     
-    /// sessionId: "song/user" or "song/user/take"
     private func splitSessionId3(_ sessionId: String) throws -> (songId: String, userId: String, takeId: String?) {
         let parts = sessionId.split(separator: "/").map(String.init)
         guard parts.count >= 2 else { throw APIError.invalidResponse("sessionIdの形式が不正: \(sessionId)") }
@@ -431,9 +402,4 @@ final class APIClient {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
-    struct SimpleError: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
-    }
-
 }

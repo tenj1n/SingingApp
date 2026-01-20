@@ -27,11 +27,25 @@ struct HistoryListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { vm.resetAndLoad() }
             
-            // フィルタが変わったら「先頭から」取り直す
             .onChange(of: vm.onlyAI) { _, _ in vm.resetAndLoad() }
             .onChange(of: vm.promptFilter) { _, _ in vm.resetAndLoad() }
             .onChange(of: vm.modelFilter) { _, _ in vm.resetAndLoad() }
         }
+    }
+    
+    // MARK: - sessionId解決
+    
+    private func resolvedSessionId(for item: HistoryItem) -> String? {
+        if let sid = item.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines), !sid.isEmpty {
+            return sid
+        }
+        
+        let rawId = item.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rawId.contains("/") {
+            return rawId
+        }
+        
+        return nil
     }
     
     // MARK: - Filter Panel
@@ -108,43 +122,23 @@ struct HistoryListView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     
-                    // ✅ ここを変更：id を明示して Binding版 ForEach を回避
                     ForEach(vm.items, id: \.id) { item in
+                        let sid = resolvedSessionId(for: item)
                         
-                        // ✅ sessionId があれば CompareView 直行
-                        if let sid = item.sessionId, !sid.isEmpty {
-                            NavigationLink {
-                                CompareView(sessionId: sid)
-                            } label: {
-                                HistoryRowCard(item: item)
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
-                                        vm.delete(at: IndexSet(integer: idx))
-                                    }
-                                } label: {
-                                    Label("削除", systemImage: "trash")
+                        // ✅ 一覧タップは常に「履歴詳細」へ
+                        NavigationLink {
+                            HistoryDetailView(item: item, resolvedSessionId: sid)
+                        } label: {
+                            HistoryRowCard(item: item, resolvedSessionId: sid)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
+                                    vm.delete(at: IndexSet(integer: idx))
                                 }
-                            }
-                            
-                        } else {
-                            // sessionId が無いものは従来通り詳細へ
-                            NavigationLink {
-                                HistoryDetailView(item: item)
                             } label: {
-                                HistoryRowCard(item: item)
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    if let idx = vm.items.firstIndex(where: { $0.id == item.id }) {
-                                        vm.delete(at: IndexSet(integer: idx))
-                                    }
-                                } label: {
-                                    Label("削除", systemImage: "trash")
-                                }
+                                Label("削除", systemImage: "trash")
                             }
                         }
                     }
@@ -159,11 +153,10 @@ struct HistoryListView: View {
             }
         }
     }
-    
+
     private var loadingPanel: some View {
         VStack(spacing: 12) {
-            ProgressView()
-                .tint(.white)
+            ProgressView().tint(.white)
             Text("読み込み中…")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.75))
@@ -256,29 +249,22 @@ struct HistoryListView: View {
 
 private struct HistoryRowCard: View {
     let item: HistoryItem
+    let resolvedSessionId: String?
     
     private var titleText: String {
-        // 1) songTitle があれば最優先
         if let s = item.songTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
-        
-        // 2) title があれば次
         if let s = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
-        
-        // 3) songId があれば、songs.json から曲名に変換して出す（ここが今回の肝）
         if let sid = item.songId?.trimmingCharacters(in: .whitespacesAndNewlines), !sid.isEmpty {
-            if let name = SongCatalog.shared.title(for: sid), !name.isEmpty {
-                return name   // ✅ "kaijyu" -> "怪獣の花唄" になる
-            }
-            return sid // 変換できなかった時だけ id を表示
+            if let name = SongCatalog.shared.title(for: sid), !name.isEmpty { return name }
+            return sid
         }
-        
         return "(no title)"
     }
-
     
     private var bodyText: String { item.body ?? "" }
     
     private var subText: String {
+        if let sid = resolvedSessionId, !sid.isEmpty { return "sid: \(sid)" }
         if let s = item.createdAt, !s.isEmpty { return s }
         if let s = item.songId, !s.isEmpty { return "song: \(s)" }
         if let s = item.source, !s.isEmpty { return "source: \(s)" }
@@ -345,10 +331,17 @@ private struct HistoryRowCard: View {
 private struct ScoreLine: View {
     let item: HistoryItem
     
+    private func textOrDash(_ v: Double?) -> String {
+        guard let v else { return "--" }
+        return String(format: "%.1f", v)
+    }
+    
     var body: some View {
-        let s  = item.score100 ?? 0
-        let ss = item.score100Strict ?? 0
-        let so = item.score100OctaveInvariant ?? 0
+        let total = item.score100
+        
+        // ✅ 本来の意味（strict / octave invariant）
+        let normal = item.score100Strict
+        let oct    = item.score100OctaveInvariant
         
         VStack(spacing: 8) {
             HStack {
@@ -356,16 +349,16 @@ private struct ScoreLine: View {
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer()
-                Text(String(format: "%.1f", s))
+                Text(textOrDash(total))
                     .font(.system(size: 14, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.9))
             }
             
-            ProgressBar(value: s / 100.0)
+            ProgressBar(value: (total ?? 0) / 100.0)
             
             HStack(spacing: 10) {
-                MiniChip(title: "通常", value: ss)
-                MiniChip(title: "OCT", value: so)
+                MiniChipText(title: "通常", text: textOrDash(normal))
+                MiniChipText(title: "OCT",  text: textOrDash(oct))
                 Spacer()
             }
         }
@@ -379,16 +372,16 @@ private struct ScoreLine: View {
     }
 }
 
-private struct MiniChip: View {
+private struct MiniChipText: View {
     let title: String
-    let value: Double
+    let text: String
     
     var body: some View {
         HStack(spacing: 6) {
             Text(title)
                 .font(.system(size: 10, weight: .heavy, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.65))
-            Text(String(format: "%.1f", value))
+            Text(text)
                 .font(.system(size: 11, weight: .heavy, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
         }
@@ -422,12 +415,19 @@ private struct ProgressBar: View {
     }
 }
 
-// MARK: - Detail View (Game UI)
+// MARK: - Detail View（ここはあなたのままでOK。必要なら同様に残せる）
 
 struct HistoryDetailView: View {
     let item: HistoryItem
+    let resolvedSessionId: String?
     
     private var titleText: String {
+        if let sid = item.songId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !sid.isEmpty,
+           let name = SongCatalog.shared.title(for: sid),
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return name
+        }
         if let s = item.songTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
         if let s = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
         if let s = item.songId?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { return s }
@@ -470,7 +470,7 @@ struct HistoryDetailView: View {
                         }
                     }
                     
-                    if let sid = item.sessionId, !sid.isEmpty {
+                    if let sid = resolvedSessionId, !sid.isEmpty {
                         NavigationLink {
                             CompareView(sessionId: sid)
                         } label: {
@@ -497,7 +497,7 @@ struct HistoryDetailView: View {
     }
 }
 
-// MARK: - Shared Components
+// MARK: - Shared Components（あなたの既存のまま）
 
 private struct GameBackground: View {
     var body: some View {
@@ -597,8 +597,6 @@ private struct GlassPrimaryButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     HistoryListView(userId: "preview_user_123")

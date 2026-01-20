@@ -152,6 +152,7 @@ struct CompareView: View {
                 Text("スコア \(vm.score100, specifier: "%.1f") 点")
                     .font(.title3.bold())
                 
+                // ✅ 修正：通常=score100 / OCT=score100OctaveInvariant
                 Text("通常: \(vm.score100Strict, specifier: "%.1f") 点 / オクターブ無視: \(vm.score100OctaveInvariant, specifier: "%.1f") 点")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -225,12 +226,8 @@ struct CompareView: View {
                     
                     Button(vm.isHistorySaved ? "保存済み" : (vm.isHistorySaving ? "保存中…" : "履歴に保存")) {
                         // ✅ songStore は使わない（未定義で落ちるため）
-                        // sessionId から songId を取り出す（"kaijyu/xxxx/xxxx" の先頭）
                         let songId = sessionId.split(separator: "/").first.map(String.init) ?? "unknown"
-                        
-                        // ✅ いったん曲名は songId を仮で入れる（後で履歴一覧では song_title を表示する）
                         let songTitle = songId
-                        
                         vm.saveAICommentToHistory(songId: songId, songTitle: songTitle)
                     }
                     .buttonStyle(.bordered)

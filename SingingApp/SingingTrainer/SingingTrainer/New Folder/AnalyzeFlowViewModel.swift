@@ -48,7 +48,7 @@ final class AnalyzeFlowViewModel: ObservableObject {
                     wavFileURL: wavFileURL
                 )
                 
-                guard up.ok, let sid = up.session_id else {
+                guard up.ok, let sid = up.sessionId else {
                     throw APIError.invalidResponse("upload failed")
                 }
                 sessionId = sid

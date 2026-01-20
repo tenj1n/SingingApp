@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class HistoryViewModel: ObservableObject {
-    @Published var items: [HistoryListResponse.HistoryItem] = []
+    @Published var items: [HistoryItem] = []
     @Published var isLoading = false          // 初回/リセット読み込み用
     @Published var isLoadingMore = false      // 追加読み込み用
     @Published var errorMessage: String?
